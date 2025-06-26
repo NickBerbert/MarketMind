@@ -1,0 +1,192 @@
+/* =============================================================================
+   MARKETMIND - ESTILOS PRINCIPAIS
+   Arquivo CSS limpo e comentado para aplicação Streamlit de análise de ações
+   ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+   REMOÇÃO DE ELEMENTOS STREAMLIT DESNECESSÁRIOS
+   ----------------------------------------------------------------------------- */
+header[data-testid="stHeader"], 
+footer, 
+.stDeployButton { 
+    display: none !important; 
+}
+
+/* -----------------------------------------------------------------------------
+   REMOÇÃO DA BORDA DO FORMULÁRIO (SOLUÇÃO TESTADA)
+   ----------------------------------------------------------------------------- */
+div[data-testid="stForm"] {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+}
+
+div[data-testid="stForm"] > div {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+div[data-testid="stForm"] form {
+    border: none !important;
+    background: transparent !important;
+}
+
+/* -----------------------------------------------------------------------------
+   TÍTULO PRINCIPAL DA APLICAÇÃO
+   ----------------------------------------------------------------------------- */
+.main-header { 
+    text-align: left; 
+    position: fixed;
+    top: 1px;
+    left: 1px;
+    color: #00d4ff; 
+    font-size: 2.5rem;
+}
+
+.main-header2 { 
+    text-align: left; 
+    top: 1px;
+    left: 1px;
+    color: #00d4ff; 
+    font-size: 2.5rem;
+}
+
+/* -----------------------------------------------------------------------------
+   LAYOUT DAS TELAS
+   ----------------------------------------------------------------------------- */
+
+/* Tela inicial de entrada */
+.tela-entrada {
+    animation: fadeIn 0.8s ease-in;
+    text-align: center;
+    padding: 2rem 0;
+}
+
+/* Tela de exibição de dados */
+.tela-dados {
+    animation: slideUp 0.6s ease-out;
+}
+
+/* Container para dados de 3 meses atrás */
+.dados-antigos {
+    padding: 0.5rem !important;
+    margin: 0.5rem 0 !important;
+}
+
+/* -----------------------------------------------------------------------------
+   COMPONENTES DE MÉTRICAS
+   ----------------------------------------------------------------------------- */
+.stMetric {
+    background-color: #152524;
+    padding: 0.2rem;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease;
+}
+
+.stMetric:hover {
+    transform: translateY(-10px);
+}
+
+[data-testid="stMetric"] {
+    font-size: 0.9rem !important;
+    padding: 0.15rem 0.25rem !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 0.8rem !important;
+}
+
+[data-testid="stMetricValue"] {
+    font-size: 1.2rem !important;
+}
+
+/* -----------------------------------------------------------------------------
+   ANIMAÇÕES
+   ----------------------------------------------------------------------------- */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.section-title {
+    font-size: 1.1rem !important;
+    margin-bottom: 0.5rem !important;
+}
+
+
+div.block-container {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+.tela-dados {
+    margin-top: 0 !important;
+    padding-top: 0.5rem !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+    overflow: hidden !important;
+    min-height: 2vh;
+    max-height: 2vh;
+}
+
+.tela-entrada, .screen-entrada {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding-top: 5rem !important;
+    min-height: 25vh;
+    text-align: center;
+}
+
+.tela-entrada h1,
+.tela-entrada h2,
+.tela-entrada h3,
+.tela-entrada h4,
+.tela-entrada p,
+.tela-entrada label,
+.tela-entrada .stTextInput {
+    text-align: center !important;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Estilização específica do formulário na tela inicial */
+.tela-entrada div[data-testid="stForm"] .stButton {
+    text-align: right !important;
+    margin-top: 1rem !important;
+    width: 100% !important;
+    display: block !important;
+}
+.tela-entrada div[data-testid="stForm"] .stButton button {
+    width: 120px !important;
+    min-width: 80px !important;
+    max-width: 160px !important;
+}
+.tela-dados .stPlotlyChart {
+    margin-top: 0.5rem !important;
+    margin-bottom: 0 !important;
+}
+
+/* Centraliza o formulário e alinha o botão à direita */
+.tela-entrada div[data-testid="stForm"] {
+    width: 320px !important;
+    margin: 0 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+}
+
+.tela-entrada div[data-testid="stForm"] .stTextInput {
+    width: 100% !important;
+}
+
