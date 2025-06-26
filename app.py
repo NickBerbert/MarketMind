@@ -362,6 +362,7 @@ def criar_grafico_com_previsao(historico, ticker, preco_previsto=None, data_prev
             ))
     
     fig.update_layout(
+        title=f'📈 {ticker}',
         xaxis_title='Data',
         yaxis_title='Preço (R$)',
         height=400,
