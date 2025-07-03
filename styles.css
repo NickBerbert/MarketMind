@@ -250,3 +250,19 @@ div.block-container {
     font-size: 0.85rem !important;
 }
 
+/* Estilo para o header do usuário logado */
+.user-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+    margin-bottom: 1rem;
+}
+
+/* Alinhamento do botão logout */
+button[data-testid="baseButton-secondary"][aria-label="Logout"] {
+    margin-top: 0 !important;
+    font-size: 0.8rem !important;
+    padding: 0.3rem 0.8rem !important;
+}
+

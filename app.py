@@ -726,18 +726,24 @@ def render_header_logado():
     """Renderiza header para usuário logado"""
     usuario = get_usuario_logado()
     if usuario:
-        # Header com título fixo removido - será adicionado estaticamente
-        col1, col2 = st.columns([1, 1])
+        # Layout usando colunas do Streamlit com proporções corretas
+        col1, col2, col3 = st.columns([3, 1, 0.5])  # Título, texto usuário, botão
+        
         with col1:
             st.markdown(f"<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
+        
         with col2:
-            # Container para o usuário e logout lado a lado
+            # Texto do usuário alinhado à direita
             st.markdown(f"""
-            <div style='display: flex; align-items: center; justify-content: flex-end; margin-top: 20px;'>
-                <span style='margin-right: 10px; font-weight: 600;'>Olá, {usuario}</span>
+            <div style='text-align: right; padding-top: 35px;'>
+                <span style='font-weight: 600; color: #ffffff; font-size: 0.9rem;'>Olá, {usuario}</span>
             </div>
             """, unsafe_allow_html=True)
-            if st.button("Logout", type="secondary", key="logout_btn"):
+        
+        with col3:
+            # Botão logout alinhado com o texto
+            st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)  # Espaçamento para alinhar
+            if st.button("Logout", type="secondary", key="logout_btn", use_container_width=True):
                 fazer_logout()
                 st.session_state.tela_atual = 'login'
                 st.rerun()
