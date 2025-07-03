@@ -3,6 +3,20 @@
    Arquivo CSS limpo e comentado para aplicação Streamlit de análise de ações
    ============================================================================= */
 
+/* Importação de fontes estéticas */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Aplicação da fonte Poppins (mais estética) em toda a aplicação */
+* {
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+/* Melhoria específica para textos */
+body, html, div, p, span, h1, h2, h3, h4, h5, h6 {
+    font-family: 'Poppins', sans-serif !important;
+    letter-spacing: -0.01em;
+}
+
 /* -----------------------------------------------------------------------------
    REMOÇÃO DE ELEMENTOS STREAMLIT DESNECESSÁRIOS
    ----------------------------------------------------------------------------- */
@@ -39,10 +53,13 @@ div[data-testid="stForm"] form {
 .main-header { 
     text-align: left; 
     position: fixed;
-    top: 1px;
-    left: 1px;
+    top: 20px;
+    left: 24px;
     color: #00d4ff; 
-    font-size: 2.5rem;
+    font-size: 2.2rem;
+    font-weight: 600;
+    font-family: 'Poppins', sans-serif !important;
+    letter-spacing: -0.02em;
 }
 
 .main-header2 { 
@@ -92,15 +109,24 @@ div[data-testid="stForm"] form {
 
 [data-testid="stMetric"] {
     font-size: 0.9rem !important;
-    padding: 0.15rem 0.25rem !important;
+    padding: 1rem 1.25rem !important;
+    margin: 0.5rem 0 !important;
+    border-radius: 12px !important;
+    background: rgba(21, 37, 36, 0.8) !important;
+    border: 1px solid rgba(0, 212, 255, 0.2) !important;
 }
 
 [data-testid="stMetricLabel"] {
-    font-size: 0.8rem !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    margin-bottom: 0.5rem !important;
+    padding-bottom: 0.25rem !important;
 }
 
 [data-testid="stMetricValue"] {
-    font-size: 1.2rem !important;
+    font-size: 1.4rem !important;
+    font-weight: 600 !important;
+    padding-top: 0.25rem !important;
 }
 
 /* -----------------------------------------------------------------------------
@@ -188,5 +214,29 @@ div.block-container {
 
 .tela-entrada div[data-testid="stForm"] .stTextInput {
     width: 100% !important;
+}
+
+/* Estilos para cards de favoritos */
+.favorite-card {
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 8px 0;
+    background: rgba(21, 37, 36, 0.7);
+    transition: all 0.2s ease;
+    cursor: pointer;
+    font-family: 'Poppins', sans-serif;
+}
+
+.favorite-card:hover {
+    border-color: #00d4ff;
+    background: rgba(21, 37, 36, 0.9);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
+}
+
+/* Espaçamento entre cards e botões de favoritos */
+.favorite-card {
+    margin-bottom: 0.5rem !important;
 }
 

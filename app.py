@@ -10,6 +10,8 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import warnings
+import json
+import os
 warnings.filterwarnings('ignore')
 
 # Configuração da página
@@ -30,6 +32,91 @@ def load_css():
 
 # Carregar CSS
 load_css()
+
+# ====================== SISTEMA DE FAVORITOS ======================
+FAVORITES_FILE = "favoritos.json"
+
+def carregar_favoritos():
+    """Carrega a lista de favoritos do arquivo JSON"""
+    try:
+        if os.path.exists(FAVORITES_FILE):
+            with open(FAVORITES_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+    except Exception:
+        return []
+
+def salvar_favoritos(favoritos):
+    """Salva a lista de favoritos no arquivo JSON"""
+    try:
+        with open(FAVORITES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(favoritos, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+def adicionar_favorito(ticker, nome, preco):
+    """Adiciona uma ação aos favoritos"""
+    favoritos = carregar_favoritos()
+    
+    # Verificar se já existe
+    for fav in favoritos:
+        if fav['ticker'] == ticker:
+            return False, "Ação já está nos favoritos"
+    
+    # Adicionar novo favorito
+    novo_favorito = {
+        'ticker': ticker,
+        'nome': nome,
+        'preco': preco,
+        'data_adicao': datetime.now().strftime('%d/%m/%Y %H:%M')
+    }
+    
+    favoritos.append(novo_favorito)
+    
+    if salvar_favoritos(favoritos):
+        return True, "Ação adicionada aos favoritos"
+    else:
+        return False, "Erro ao salvar favorito"
+
+def remover_favorito(ticker):
+    """Remove uma ação dos favoritos"""
+    favoritos = carregar_favoritos()
+    
+    favoritos = [fav for fav in favoritos if fav['ticker'] != ticker]
+    
+    if salvar_favoritos(favoritos):
+        return True, "Ação removida dos favoritos"
+    else:
+        return False, "Erro ao remover favorito"
+
+def eh_favorito(ticker):
+    """Verifica se uma ação está nos favoritos"""
+    favoritos = carregar_favoritos()
+    return any(fav['ticker'] == ticker for fav in favoritos)
+
+def buscar_dados_rapidos(ticker):
+    """Busca apenas dados essenciais para exibição rápida dos favoritos"""
+    try:
+        API_KEY = "nUUZxG2ZdAWuSkBDhPobC2"
+        headers = {"Authorization": f"Bearer {API_KEY}"}
+        
+        url_cotacao = f"https://brapi.dev/api/quote/{ticker}"
+        response = requests.get(url_cotacao, headers=headers, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'results' in data and data['results']:
+                acao_data = data['results'][0]
+                return {
+                    'preco': round(acao_data.get('regularMarketPrice', 0), 2),
+                    'variacao': round(acao_data.get('regularMarketChangePercent', 0), 2),
+                    'sucesso': True
+                }
+    except:
+        pass
+    
+    return {'preco': 0, 'variacao': 0, 'sucesso': False}
 
 def preparar_dados_lstm(historico_df):
     """
@@ -120,7 +207,7 @@ def treinar_modelo_lstm(X, y):
         # Treinar modelo (épocas adaptativas)
         epochs = min(50, max(20, len(X_train) // 2))  # Entre 20-50 épocas
         
-        with st.spinner(f'🤖 Treinando modelo de IA... ({epochs} épocas)'):
+        with st.spinner(f'Treinando modelo de IA... ({epochs} épocas)'):
             history = model.fit(
                 X_train, y_train,
                 epochs=epochs,
@@ -263,6 +350,9 @@ def buscar_dados_acao(ticker):
                                 hist_list.append({
                                     'Data': data_ponto,
                                     'Close': item.get('close', 0),
+                                    'Open': item.get('open', 0),
+                                    'High': item.get('high', 0),
+                                    'Low': item.get('low', 0),
                                     'Volume': item.get('volume', 0)
                                 })
                             except (KeyError, ValueError):
@@ -283,16 +373,45 @@ def buscar_dados_acao(ticker):
                                     'volume': int(dados_3m_atras['Volume'])
                                 }
             
-            # 3. Montar dados de retorno
+            # 3. Calcular indicadores técnicos se temos histórico
+            indicadores = {}
+            if historico is not None and len(historico) > 0:
+                # Máxima e mínima dos últimos 52 semanas (ou período disponível)
+                indicadores['maxima_52s'] = round(historico['High'].max(), 2)
+                indicadores['minima_52s'] = round(historico['Low'].min(), 2)
+                
+                # Volume médio dos últimos 30 dias
+                volume_medio = historico['Volume'].tail(min(30, len(historico))).mean()
+                indicadores['volume_medio'] = int(volume_medio) if not pd.isna(volume_medio) else 0
+                
+                # Média móvel simples de 20 e 50 dias
+                if len(historico) >= 20:
+                    indicadores['media_20d'] = round(historico['Close'].tail(20).mean(), 2)
+                if len(historico) >= 50:
+                    indicadores['media_50d'] = round(historico['Close'].tail(50).mean(), 2)
+                
+                # Volatilidade (desvio padrão dos últimos 30 dias)
+                if len(historico) >= 30:
+                    returns = historico['Close'].pct_change().tail(30)
+                    volatilidade = returns.std() * np.sqrt(252) * 100  # Anualizada
+                    indicadores['volatilidade'] = round(volatilidade, 1)
+            
+            # 4. Montar dados de retorno
             dados = {
                 'ticker': acao_data.get('symbol', ticker),
                 'nome': acao_data.get('shortName', acao_data.get('longName', 'N/A')),
                 'preco': round(acao_data.get('regularMarketPrice', 0), 2),
                 'variacao': round(acao_data.get('regularMarketChangePercent', 0), 2),
+                'variacao_valor': round(acao_data.get('regularMarketChange', 0), 2),
                 'maxima': round(acao_data.get('regularMarketDayHigh', 0), 2),
                 'minima': round(acao_data.get('regularMarketDayLow', 0), 2),
+                'volume': acao_data.get('regularMarketVolume', 0),
+                'abertura': round(acao_data.get('regularMarketOpen', 0), 2),
+                'fechamento_anterior': round(acao_data.get('regularMarketPreviousClose', 0), 2),
+                'market_cap': acao_data.get('marketCap', 0),
                 'historico': historico,
-                'dados_3_meses': dados_3_meses
+                'dados_3_meses': dados_3_meses,
+                'indicadores': indicadores
             }
             
             return dados, None
@@ -344,7 +463,7 @@ def criar_grafico_com_previsao(historico, ticker, preco_previsto=None, data_prev
                     symbol='star',
                     line=dict(color='white', width=2)
                 ),
-                hovertemplate='<b>🤖 Previsão IA</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
+                hovertemplate='<b>Previsão IA</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
             ))
             
             # Linha conectando último ponto real com previsão
@@ -362,7 +481,7 @@ def criar_grafico_com_previsao(historico, ticker, preco_previsto=None, data_prev
             ))
     
     fig.update_layout(
-        title=f'📈 {ticker}',
+        title=f'{ticker}',
         xaxis_title='Data',
         yaxis_title='Preço (R$)',
         height=400,
@@ -404,7 +523,7 @@ if 'mostrar_previsao' not in st.session_state:
 if not st.session_state.mostrar_dados:
     
     st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
-    st.markdown("<h1 class='main-header'>🧠 MarketMind</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
     
     st.markdown("### Digite o código da ação que deseja analisar:")
     
@@ -417,7 +536,7 @@ if not st.session_state.mostrar_dados:
             key="ticker_input"
         )
         submitted = st.form_submit_button(
-            "🔍 Analisar Ação", 
+            "Analisar Ação", 
             type="primary"
         )
     
@@ -425,14 +544,81 @@ if not st.session_state.mostrar_dados:
         dados, erro = buscar_dados_acao(ticker)
         
         if erro:
-            st.error(f"❌ {erro}")
+            st.error(f"Erro: {erro}")
         else:
             st.session_state.dados_acao = dados
             st.session_state.mostrar_dados = True
             st.session_state.mostrar_previsao = False
             st.rerun()
     elif submitted:
-        st.error("⚠️ Por favor, digite o código de uma ação")
+        st.error("Por favor, digite o código de uma ação")
+    
+    # Mostrar favoritos apenas se existirem (para não quebrar o layout)
+    favoritos = carregar_favoritos()
+    if favoritos:
+        st.markdown("---")  # Linha divisória sutil
+        st.markdown("### Favoritos")
+        
+        # Mostrar favoritos em grid 2x3 para melhor visualização
+        cols = st.columns(2)  # 2 colunas principais
+        
+        for i, fav in enumerate(favoritos[:4]):  # Máximo 4 favoritos na tela inicial
+            with cols[i % 2]:
+                # Buscar dados rápidos
+                dados_rapidos = buscar_dados_rapidos(fav['ticker'])
+                
+                # Card de informações
+                if dados_rapidos['sucesso']:
+                    # Card com informações
+                    variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
+                    
+                    card_content = f"""
+                    <div class='favorite-card'>
+                        <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
+                        <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
+                        <div style='font-size: 0.9em; font-weight: 500; color: {"#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
+                    </div>
+                    """
+                    st.markdown(card_content, unsafe_allow_html=True)
+                else:
+                    # Card simples sem dados atualizados
+                    card_content = f"""
+                    <div class='favorite-card' style='background: rgba(21, 37, 36, 0.4);'>
+                        <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
+                        <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
+                    </div>
+                    """
+                    st.markdown(card_content, unsafe_allow_html=True)
+                
+                # Botões embaixo do card
+                btn_col1, btn_col2 = st.columns(2)
+                
+                with btn_col1:
+                    # Botão de análise
+                    if st.button("Analisar", key=f"analyze_{fav['ticker']}", use_container_width=True, type="primary"):
+                        # Carregar dados completos da ação favorita
+                        dados, erro = buscar_dados_acao(fav['ticker'])
+                        if erro:
+                            st.error(f"Erro: {erro}")
+                        else:
+                            st.session_state.dados_acao = dados
+                            st.session_state.mostrar_dados = True
+                            st.session_state.mostrar_previsao = False
+                            st.rerun()
+                
+                with btn_col2:
+                    # Botão de remoção
+                    if st.button("Remover", key=f"remove_{fav['ticker']}", use_container_width=True, type="secondary"):
+                        sucesso, mensagem = remover_favorito(fav['ticker'])
+                        if sucesso:
+                            st.success(mensagem)
+                            st.rerun()
+                        else:
+                            st.error(mensagem)
+        
+        # Se há mais de 4 favoritos, mostrar contador
+        if len(favoritos) > 4:
+            st.caption(f"+ {len(favoritos) - 4} outros favoritos")
     
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -445,62 +631,138 @@ elif st.session_state.mostrar_dados and not st.session_state.mostrar_previsao:
     # Header com título
     # st.markdown(f"<h1 class='main-header2'>📊 {dados['ticker']} - {dados['nome']}</h1>", unsafe_allow_html=True)
     
-        # Linha do título e botão juntos
-    col_titulo, col_btn_prev, col_btn = st.columns([3, 1, 1])
+        # Linha do título e botões juntos
+    col_titulo, col_btn_fav, col_btn_prev, col_btn = st.columns([2, 1, 1, 1])
     with col_titulo:
-        st.markdown("<h4 class='section-title'>📈 Cotação Atual</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 class='section-title'>Cotação Atual</h4>", unsafe_allow_html=True)
+    with col_btn_fav:
+        # Botão de favoritos
+        is_fav = eh_favorito(dados['ticker'])
+        btn_text = "★ Remover" if is_fav else "☆ Favoritar"
+        btn_type = "secondary" if is_fav else "primary"
+        
+        if st.button(btn_text, type=btn_type, use_container_width=True, key="fav_analise"):
+            if is_fav:
+                sucesso, mensagem = remover_favorito(dados['ticker'])
+            else:
+                sucesso, mensagem = adicionar_favorito(dados['ticker'], dados['nome'], dados['preco'])
+            
+            if sucesso:
+                st.success(mensagem)
+                st.rerun()
+            else:
+                st.error(mensagem)
     with col_btn_prev:
-        if st.button("🔮 Gerar Previsão", type="secondary", use_container_width=True):
+        if st.button("Gerar Previsão", type="secondary", use_container_width=True):
             st.session_state.mostrar_previsao = True
             st.rerun()
     with col_btn:
-        if st.button("🔁 Nova Análise", type="secondary", use_container_width=True):
+        if st.button("Nova Análise", type="secondary", use_container_width=True):
             st.session_state.mostrar_dados = False
             st.session_state.mostrar_previsao = False
             st.session_state.dados_acao = None
             st.rerun()
 
-    # Linha das métricas
+    # Linha das métricas principais
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("💰 Preço", f"R$ {dados['preco']:.2f}")
+        variacao_valor = dados.get('variacao_valor', 0)
+        st.metric("Preço Atual", f"R$ {dados['preco']:.2f}", 
+                 delta=f"R$ {variacao_valor:.2f}")
     with col2:
-        variacao_cor = "📊" if dados['variacao'] >= 0 else "📉"
-        st.metric(f"{variacao_cor} Variação", f"{dados['variacao']:.2f}%")
+        st.metric("Variação %", f"{dados['variacao']:.2f}%")
     with col3:
-        st.metric("📈 Máxima", f"R$ {dados['maxima']:.2f}")
+        st.metric("Máxima do Dia", f"R$ {dados['maxima']:.2f}")
     with col4:
-        st.metric("📉 Mínima", f"R$ {dados['minima']:.2f}")
+        st.metric("Mínima do Dia", f"R$ {dados['minima']:.2f}")
+
+    # Segunda linha - Informações adicionais do dia
+    st.markdown("<h4 class='section-title'>Informações do Pregão</h4>", unsafe_allow_html=True)
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Abertura", f"R$ {dados.get('abertura', 0):.2f}")
+    with col2:
+        fechamento_ant = dados.get('fechamento_anterior', 0)
+        st.metric("Fechamento Anterior", f"R$ {fechamento_ant:.2f}")
+    with col3:
+        volume = dados.get('volume', 0)
+        volume_formatado = f"{volume:,}".replace(",", ".")
+        st.metric("Volume do Dia", volume_formatado)
+    with col4:
+        market_cap = dados.get('market_cap', 0)
+        if market_cap > 0:
+            if market_cap >= 1e9:
+                cap_formatado = f"R$ {market_cap/1e9:.1f}B"
+            elif market_cap >= 1e6:
+                cap_formatado = f"R$ {market_cap/1e6:.1f}M"
+            else:
+                cap_formatado = f"R$ {market_cap:,.0f}".replace(",", ".")
+            st.metric("Market Cap", cap_formatado)
+        else:
+            st.metric("Market Cap", "N/D")
+
+    # Terceira linha - Indicadores técnicos
+    indicadores = dados.get('indicadores', {})
+    if indicadores:
+        st.markdown("<h4 class='section-title'>Indicadores Técnicos</h4>", unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            maxima_52s = indicadores.get('maxima_52s')
+            if maxima_52s:
+                st.metric("Máxima 52S", f"R$ {maxima_52s:.2f}")
+            else:
+                st.metric("Máxima 52S", "N/D")
+        
+        with col2:
+            minima_52s = indicadores.get('minima_52s')
+            if minima_52s:
+                st.metric("Mínima 52S", f"R$ {minima_52s:.2f}")
+            else:
+                st.metric("Mínima 52S", "N/D")
+        
+        with col3:
+            media_20d = indicadores.get('media_20d')
+            if media_20d:
+                st.metric("Média 20D", f"R$ {media_20d:.2f}")
+            else:
+                st.metric("Média 20D", "N/D")
+        
+        with col4:
+            volatilidade = indicadores.get('volatilidade')
+            if volatilidade:
+                st.metric("Volatilidade", f"{volatilidade:.1f}%")
+            else:
+                st.metric("Volatilidade", "N/D")
 
     
     # Linha 2: Dados Históricos (3 colunas + performance)
     if dados['dados_3_meses']:
-        st.markdown("<h4 class='section-title'>📅 Comparativo 3 Meses</h4 >", unsafe_allow_html=True)
+        st.markdown("<h4 class='section-title'>Comparativo 3 Meses</h4 >", unsafe_allow_html=True)
         
         d3m = dados['dados_3_meses']
         
         col1_hist, col2_hist, col3_hist, col4_hist = st.columns(4)
         
         with col1_hist:
-            st.metric("💰 Preço 3M", f"R$ {d3m['preco']:.2f}")
+            st.metric("Preço 3M", f"R$ {d3m['preco']:.2f}")
         with col2_hist:
             volume_formatado = f"{d3m['volume']:,}".replace(",", ".")
-            st.metric("📊 Volume", volume_formatado)
+            st.metric("Volume", volume_formatado)
         with col3_hist:
-            st.metric("📅 Data", d3m['data'])
+            st.metric("Data", d3m['data'])
         with col4_hist:
             # Cálculo de performance
             if dados['preco'] > 0 and d3m['preco'] > 0:
                 performance = ((dados['preco'] - d3m['preco']) / d3m['preco']) * 100
-                performance_emoji = "📈" if performance >= 0 else "📉"
-                st.metric(f"{performance_emoji} Performance 3M", f"{performance:.2f}%")
+                st.metric("Performance 3M", f"{performance:.2f}%")
     
     
     if dados['historico'] is not None:
         fig_analise = criar_grafico_com_previsao(dados['historico'], dados['ticker'])
         st.plotly_chart(fig_analise, use_container_width=True)
     else:
-        st.markdown("<div style='color: #ff6b6b;'>⚠️ Dados históricos indisponíveis</div>", unsafe_allow_html=True)
+        st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
     
     st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
 
@@ -511,59 +773,74 @@ elif st.session_state.mostrar_previsao:
     st.markdown("<div class='tela-dados'>", unsafe_allow_html=True)
     
     # Header com título
-    col_titulo, col_btn_volta, col_btn = st.columns([3, 1, 1])
+    col_titulo, col_btn_fav, col_btn_volta, col_btn = st.columns([2, 1, 1, 1])
     with col_titulo:
-        st.markdown("<h4 class='section-title'>🔮 Previsão de Preços com IA</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 class='section-title'>Previsão de Preços com IA</h4>", unsafe_allow_html=True)
+    with col_btn_fav:
+        # Botão de favoritos
+        is_fav = eh_favorito(dados['ticker'])
+        btn_text = "★ Remover" if is_fav else "☆ Favoritar"
+        btn_type = "secondary" if is_fav else "primary"
+        
+        if st.button(btn_text, type=btn_type, use_container_width=True, key="fav_previsao"):
+            if is_fav:
+                sucesso, mensagem = remover_favorito(dados['ticker'])
+            else:
+                sucesso, mensagem = adicionar_favorito(dados['ticker'], dados['nome'], dados['preco'])
+            
+            if sucesso:
+                st.success(mensagem)
+                st.rerun()
+            else:
+                st.error(mensagem)
     with col_btn_volta:
-        if st.button("↩️ Voltar", type="secondary", use_container_width=True):
+        if st.button("Voltar", type="secondary", use_container_width=True):
             st.session_state.mostrar_previsao = False
             st.rerun()
     with col_btn:
-        if st.button("🔁 Nova Análise", type="secondary", use_container_width=True):
+        if st.button("Nova Análise", type="secondary", use_container_width=True):
             st.session_state.mostrar_dados = False
             st.session_state.mostrar_previsao = False
             st.session_state.dados_acao = None
             st.rerun()
 
     # Gerar previsão usando ML
-    with st.spinner('🤖 Gerando previsão com Inteligência Artificial...'):
+    with st.spinner('Gerando previsão com Inteligência Artificial...'):
         preco_previsto, data_previsao, erro_ml = gerar_previsao_acao(dados)
     
     if erro_ml:
-        st.error(f"❌ Erro na previsão: {erro_ml}")
-        st.info("💡 **Dica:** A previsão requer pelo menos 20 dias de histórico com dados de volume.")
+        st.error(f"Erro na previsão: {erro_ml}")
+        st.info("**Dica:** A previsão requer pelo menos 20 dias de histórico com dados de volume.")
         preco_previsto, data_previsao = None, None
     else:
         # Calcular variação prevista
         variacao_prevista = ((preco_previsto - dados['preco']) / dados['preco']) * 100
         
         # Exibir resultado da previsão
-        st.success(f"🎯 **Previsão gerada com sucesso!**")
+        st.success("**Previsão gerada com sucesso!**")
         
         col_prev1, col_prev2, col_prev3, col_prev4 = st.columns(4)
         with col_prev1:
-            st.metric("🤖 Previsão IA", f"R$ {preco_previsto:.2f}")
+            st.metric("Previsão IA", f"R$ {preco_previsto:.2f}")
         with col_prev2:
-            variacao_emoji = "📈" if variacao_prevista >= 0 else "📉"
-            st.metric(f"{variacao_emoji} Variação Prevista", f"{variacao_prevista:.2f}%")
+            st.metric("Variação Prevista", f"{variacao_prevista:.2f}%")
         with col_prev3:
-            st.metric("📅 Para o Dia", data_previsao.strftime('%d/%m/%Y'))
+            st.metric("Para o Dia", data_previsao.strftime('%d/%m/%Y'))
         with col_prev4:
             confianca = min(85, max(60, 75 + abs(variacao_prevista) * 2))  # Simulação de confiança
-            st.metric("🎯 Confiança", f"{confianca:.0f}%")
+            st.metric("Confiança", f"{confianca:.0f}%")
 
     # Linha das métricas atuais
-    st.markdown("<h4 class='section-title'>📊 Dados Atuais</h4>", unsafe_allow_html=True)
+    st.markdown("<h4 class='section-title'>Dados Atuais</h4>", unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("💰 Preço Atual", f"R$ {dados['preco']:.2f}")
+        st.metric("Preço Atual", f"R$ {dados['preco']:.2f}")
     with col2:
-        variacao_cor = "📊" if dados['variacao'] >= 0 else "📉"
-        st.metric(f"{variacao_cor} Variação", f"{dados['variacao']:.2f}%")
+        st.metric("Variação", f"{dados['variacao']:.2f}%")
     with col3:
-        st.metric("📈 Máxima", f"R$ {dados['maxima']:.2f}")
+        st.metric("Máxima", f"R$ {dados['maxima']:.2f}")
     with col4:
-        st.metric("📉 Mínima", f"R$ {dados['minima']:.2f}")
+        st.metric("Mínima", f"R$ {dados['minima']:.2f}")
 
     # Gráfico com previsão
     if dados['historico'] is not None:
@@ -575,22 +852,22 @@ elif st.session_state.mostrar_previsao:
         )
         st.plotly_chart(fig_previsao, use_container_width=True)
     else:
-        st.markdown("<div style='color: #ff6b6b;'>⚠️ Dados históricos indisponíveis</div>", unsafe_allow_html=True)
+        st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
     
     # Informações sobre o modelo
     if not erro_ml:
-        with st.expander("ℹ️ Sobre a Previsão"):
+        with st.expander("Sobre a Previsão"):
             st.markdown("""
-            **🤖 Modelo utilizado:** LSTM (Long Short-Term Memory)
+            **Modelo utilizado:** LSTM (Long Short-Term Memory)
             
-            **📊 Dados analisados:**
+            **Dados analisados:**
             - Preços de fechamento (sequência adaptativa)
             - Volume de negociação
             - Médias móveis (7 e 21 dias)
             - Variações percentuais
             - Modelo ajustado para dados disponíveis (20-41 dias)
             
-            **⚠️ Aviso importante:**
+            **Aviso importante:**
             - Esta é uma previsão baseada em padrões históricos
             - Não constitui recomendação de investimento
             - Mercados financeiros são imprevisíveis por natureza
