@@ -33,31 +33,144 @@ def load_css():
 # Carregar CSS
 load_css()
 
-# ====================== SISTEMA DE FAVORITOS ======================
-FAVORITES_FILE = "favoritos.json"
+# ====================== SISTEMA DE AUTENTICAÇÃO ======================
+USERS_FILE = "usuarios.json"
+FAVORITES_DIR = "favoritos_usuarios"
 
-def carregar_favoritos():
-    """Carrega a lista de favoritos do arquivo JSON"""
+def carregar_usuarios():
+    """Carrega a lista de usuários do arquivo JSON"""
     try:
-        if os.path.exists(FAVORITES_FILE):
-            with open(FAVORITES_FILE, 'r', encoding='utf-8') as f:
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception:
+        return {}
+
+def salvar_usuarios(usuarios):
+    """Salva a lista de usuários no arquivo JSON"""
+    try:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(usuarios, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+def hash_password(password):
+    """Simples hash da senha (em produção usar bcrypt)"""
+    import hashlib
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def criar_usuario(username, email, password):
+    """Cria um novo usuário"""
+    usuarios = carregar_usuarios()
+    
+    # Verificar se usuário já existe
+    if username in usuarios:
+        return False, "Usuário já existe"
+    
+    # Verificar se email já existe
+    for user_data in usuarios.values():
+        if user_data.get('email') == email:
+            return False, "Email já cadastrado"
+    
+    # Criar novo usuário
+    usuarios[username] = {
+        'email': email,
+        'password': hash_password(password),
+        'data_criacao': datetime.now().strftime('%d/%m/%Y %H:%M')
+    }
+    
+    # Criar diretório de favoritos se não existir
+    if not os.path.exists(FAVORITES_DIR):
+        os.makedirs(FAVORITES_DIR)
+    
+    if salvar_usuarios(usuarios):
+        return True, "Usuário criado com sucesso"
+    else:
+        return False, "Erro ao criar usuário"
+
+def autenticar_usuario(username, password):
+    """Autentica um usuário"""
+    usuarios = carregar_usuarios()
+    
+    if username not in usuarios:
+        return False, "Usuário não encontrado"
+    
+    if usuarios[username]['password'] != hash_password(password):
+        return False, "Senha incorreta"
+    
+    return True, "Login realizado com sucesso"
+
+def get_usuario_logado():
+    """Retorna o usuário atualmente logado"""
+    return st.session_state.get('usuario_logado', None)
+
+def fazer_login(username):
+    """Fazer login do usuário"""
+    st.session_state.usuario_logado = username
+
+def fazer_logout():
+    """Fazer logout do usuário"""
+    if 'usuario_logado' in st.session_state:
+        del st.session_state.usuario_logado
+    if 'dados_acao' in st.session_state:
+        del st.session_state.dados_acao
+    if 'mostrar_dados' in st.session_state:
+        del st.session_state.mostrar_dados
+    if 'mostrar_previsao' in st.session_state:
+        del st.session_state.mostrar_previsao
+
+# ====================== SISTEMA DE FAVORITOS POR USUÁRIO ======================
+
+def get_favorites_file(username):
+    """Retorna o caminho do arquivo de favoritos para o usuário"""
+    return os.path.join(FAVORITES_DIR, f"{username}_favoritos.json")
+
+def carregar_favoritos(username=None):
+    """Carrega a lista de favoritos do usuário"""
+    if username is None:
+        username = get_usuario_logado()
+    
+    if username is None:
+        return []
+    
+    try:
+        favorites_file = get_favorites_file(username)
+        if os.path.exists(favorites_file):
+            with open(favorites_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         return []
     except Exception:
         return []
 
-def salvar_favoritos(favoritos):
-    """Salva a lista de favoritos no arquivo JSON"""
+def salvar_favoritos(favoritos, username=None):
+    """Salva a lista de favoritos do usuário"""
+    if username is None:
+        username = get_usuario_logado()
+    
+    if username is None:
+        return False
+    
     try:
-        with open(FAVORITES_FILE, 'w', encoding='utf-8') as f:
+        # Criar diretório se não existir
+        if not os.path.exists(FAVORITES_DIR):
+            os.makedirs(FAVORITES_DIR)
+        
+        favorites_file = get_favorites_file(username)
+        with open(favorites_file, 'w', encoding='utf-8') as f:
             json.dump(favoritos, f, ensure_ascii=False, indent=2)
         return True
     except Exception:
         return False
 
 def adicionar_favorito(ticker, nome, preco):
-    """Adiciona uma ação aos favoritos"""
-    favoritos = carregar_favoritos()
+    """Adiciona uma ação aos favoritos do usuário logado"""
+    username = get_usuario_logado()
+    if username is None:
+        return False, "Usuário não está logado"
+    
+    favoritos = carregar_favoritos(username)
     
     # Verificar se já existe
     for fav in favoritos:
@@ -74,25 +187,32 @@ def adicionar_favorito(ticker, nome, preco):
     
     favoritos.append(novo_favorito)
     
-    if salvar_favoritos(favoritos):
+    if salvar_favoritos(favoritos, username):
         return True, "Ação adicionada aos favoritos"
     else:
         return False, "Erro ao salvar favorito"
 
 def remover_favorito(ticker):
-    """Remove uma ação dos favoritos"""
-    favoritos = carregar_favoritos()
+    """Remove uma ação dos favoritos do usuário logado"""
+    username = get_usuario_logado()
+    if username is None:
+        return False, "Usuário não está logado"
     
+    favoritos = carregar_favoritos(username)
     favoritos = [fav for fav in favoritos if fav['ticker'] != ticker]
     
-    if salvar_favoritos(favoritos):
+    if salvar_favoritos(favoritos, username):
         return True, "Ação removida dos favoritos"
     else:
         return False, "Erro ao remover favorito"
 
 def eh_favorito(ticker):
-    """Verifica se uma ação está nos favoritos"""
-    favoritos = carregar_favoritos()
+    """Verifica se uma ação está nos favoritos do usuário logado"""
+    username = get_usuario_logado()
+    if username is None:
+        return False
+    
+    favoritos = carregar_favoritos(username)
     return any(fav['ticker'] == ticker for fav in favoritos)
 
 def buscar_dados_rapidos(ticker):
@@ -518,77 +638,190 @@ if 'dados_acao' not in st.session_state:
     st.session_state.dados_acao = None
 if 'mostrar_previsao' not in st.session_state:
     st.session_state.mostrar_previsao = False
+if 'tela_atual' not in st.session_state:
+    st.session_state.tela_atual = 'login'  # Começar na tela de login
+if 'usuario_logado' not in st.session_state:
+    st.session_state.usuario_logado = None
 
-# ====================== TELA 1 - ENTRADA ======================
-if not st.session_state.mostrar_dados:
-    
+# ====================== TELAS DE AUTENTICAÇÃO ======================
+
+def render_login():
+    """Renderiza tela de login"""
     st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
     st.markdown("<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
     
-    st.markdown("### Digite o código da ação que deseja analisar:")
+    st.markdown("### Login")
     
-    # Formulário de entrada
-    with st.form("busca_acao"):
-        ticker = st.text_input(
-            "", 
-            placeholder="Ex: PETR4, VALE3, ITUB4", 
-            label_visibility="collapsed",
-            key="ticker_input"
-        )
-        submitted = st.form_submit_button(
-            "Analisar Ação", 
-            type="primary"
-        )
-    
-    if submitted and ticker:
-        dados, erro = buscar_dados_acao(ticker)
+    with st.form("login_form"):
+        username = st.text_input("Usuário", placeholder="Digite seu usuário")
+        password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
         
-        if erro:
-            st.error(f"Erro: {erro}")
+        col1, col2 = st.columns(2)
+        with col1:
+            login_button = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+        with col2:
+            if st.form_submit_button("Criar Conta", use_container_width=True):
+                st.session_state.tela_atual = 'cadastro'
+                st.rerun()
+    
+    if login_button:
+        if username and password:
+            sucesso, mensagem = autenticar_usuario(username, password)
+            if sucesso:
+                fazer_login(username)
+                st.session_state.tela_atual = 'home'
+                st.success(mensagem)
+                st.rerun()
+            else:
+                st.error(mensagem)
         else:
-            st.session_state.dados_acao = dados
-            st.session_state.mostrar_dados = True
-            st.session_state.mostrar_previsao = False
-            st.rerun()
-    elif submitted:
-        st.error("Por favor, digite o código de uma ação")
+            st.error("Por favor, preencha todos os campos")
     
-    # Mostrar favoritos apenas se existirem (para não quebrar o layout)
-    favoritos = carregar_favoritos()
-    if favoritos:
-        st.markdown("---")  # Linha divisória sutil
-        st.markdown("### Favoritos")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def render_cadastro():
+    """Renderiza tela de cadastro"""
+    st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
+    st.markdown("<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
+    
+    st.markdown("### Criar Conta")
+    
+    with st.form("cadastro_form"):
+        username = st.text_input("Usuário", placeholder="Escolha um nome de usuário")
+        email = st.text_input("Email", placeholder="Digite seu email")
+        password = st.text_input("Senha", type="password", placeholder="Escolha uma senha")
+        password_confirm = st.text_input("Confirmar Senha", type="password", placeholder="Confirme sua senha")
         
-        # Mostrar favoritos em grid 2x3 para melhor visualização
-        cols = st.columns(2)  # 2 colunas principais
-        
-        for i, fav in enumerate(favoritos[:4]):  # Máximo 4 favoritos na tela inicial
-            with cols[i % 2]:
-                # Buscar dados rápidos
-                dados_rapidos = buscar_dados_rapidos(fav['ticker'])
-                
-                # Card de informações
-                if dados_rapidos['sucesso']:
-                    # Card com informações
-                    variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
-                    
-                    card_content = f"""
-                    <div class='favorite-card'>
-                        <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
-                        <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
-                        <div style='font-size: 0.9em; font-weight: 500; color: {"#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
-                    </div>
-                    """
-                    st.markdown(card_content, unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            cadastro_button = st.form_submit_button("Criar Conta", type="primary", use_container_width=True)
+        with col2:
+            if st.form_submit_button("Voltar ao Login", use_container_width=True):
+                st.session_state.tela_atual = 'login'
+                st.rerun()
+    
+    if cadastro_button:
+        if username and email and password and password_confirm:
+            if password != password_confirm:
+                st.error("As senhas não coincidem")
+            elif len(password) < 6:
+                st.error("A senha deve ter pelo menos 6 caracteres")
+            elif len(username) < 3:
+                st.error("O usuário deve ter pelo menos 3 caracteres")
+            else:
+                sucesso, mensagem = criar_usuario(username, email, password)
+                if sucesso:
+                    st.success(mensagem)
+                    st.info("Agora você pode fazer login com suas credenciais")
+                    st.session_state.tela_atual = 'login'
+                    st.rerun()
                 else:
-                    # Card simples sem dados atualizados
-                    card_content = f"""
-                    <div class='favorite-card' style='background: rgba(21, 37, 36, 0.4);'>
-                        <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
-                        <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
-                    </div>
-                    """
-                    st.markdown(card_content, unsafe_allow_html=True)
+                    st.error(mensagem)
+        else:
+            st.error("Por favor, preencha todos os campos")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def render_header_logado():
+    """Renderiza header para usuário logado"""
+    usuario = get_usuario_logado()
+    if usuario:
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.markdown(f"<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"**Olá, {usuario}**")
+            if st.button("Logout", type="secondary"):
+                fazer_logout()
+                st.session_state.tela_atual = 'login'
+                st.rerun()
+
+# ====================== CONTROLE DE TELAS ======================
+
+# Roteamento baseado na autenticação e tela atual
+if st.session_state.tela_atual == 'login':
+    render_login()
+elif st.session_state.tela_atual == 'cadastro':
+    render_cadastro()
+else:
+    # Verificar se usuário está logado
+    if not get_usuario_logado():
+        st.session_state.tela_atual = 'login'
+        st.rerun()
+    
+    # Renderizar header para usuário logado
+    render_header_logado()
+    
+    # ====================== TELA 1 - ENTRADA ======================
+    if not st.session_state.mostrar_dados:
+        
+        st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
+        # Não mostrar o título aqui pois já está no header
+    
+        st.markdown("### Digite o código da ação que deseja analisar:")
+        
+        # Formulário de entrada
+        with st.form("busca_acao"):
+            ticker = st.text_input(
+                "", 
+                placeholder="Ex: PETR4, VALE3, ITUB4", 
+                label_visibility="collapsed",
+                key="ticker_input"
+            )
+            submitted = st.form_submit_button(
+                "Analisar Ação", 
+                type="primary"
+            )
+        
+        if submitted and ticker:
+            dados, erro = buscar_dados_acao(ticker)
+            
+            if erro:
+                st.error(f"Erro: {erro}")
+            else:
+                st.session_state.dados_acao = dados
+                st.session_state.mostrar_dados = True
+                st.session_state.mostrar_previsao = False
+                st.rerun()
+        elif submitted:
+            st.error("Por favor, digite o código de uma ação")
+    
+        # Mostrar favoritos apenas se existirem (para não quebrar o layout)
+        favoritos = carregar_favoritos()
+        if favoritos:
+            st.markdown("---")  # Linha divisória sutil
+            st.markdown("### Favoritos")
+            
+            # Mostrar favoritos em grid 2x3 para melhor visualização
+            cols = st.columns(2)  # 2 colunas principais
+            
+            for i, fav in enumerate(favoritos[:4]):  # Máximo 4 favoritos na tela inicial
+                with cols[i % 2]:
+                    # Buscar dados rápidos
+                    dados_rapidos = buscar_dados_rapidos(fav['ticker'])
+                    
+                    # Card de informações
+                    if dados_rapidos['sucesso']:
+                        # Card com informações
+                        variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
+                        
+                        card_content = f"""
+                        <div class='favorite-card'>
+                            <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
+                            <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
+                            <div style='font-size: 0.9em; font-weight: 500; color: {"#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
+                        </div>
+                        """
+                        st.markdown(card_content, unsafe_allow_html=True)
+                    else:
+                        # Card simples sem dados atualizados
+                        card_content = f"""
+                        <div class='favorite-card' style='background: rgba(21, 37, 36, 0.4);'>
+                            <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
+                            <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
+                        </div>
+                        """
+                        st.markdown(card_content, unsafe_allow_html=True)
                 
                 # Botões embaixo do card
                 btn_col1, btn_col2 = st.columns(2)
@@ -622,256 +855,256 @@ if not st.session_state.mostrar_dados:
     
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ====================== TELA 2 - DADOS ======================
-elif st.session_state.mostrar_dados and not st.session_state.mostrar_previsao:
-    dados = st.session_state.dados_acao
-    
-    st.markdown("<div class='tela-dados'>", unsafe_allow_html=True)
-    
-    # Header com título
-    # st.markdown(f"<h1 class='main-header2'>📊 {dados['ticker']} - {dados['nome']}</h1>", unsafe_allow_html=True)
-    
-        # Linha do título e botões juntos
-    col_titulo, col_btn_fav, col_btn_prev, col_btn = st.columns([2, 1, 1, 1])
-    with col_titulo:
-        st.markdown("<h4 class='section-title'>Cotação Atual</h4>", unsafe_allow_html=True)
-    with col_btn_fav:
-        # Botão de favoritos
-        is_fav = eh_favorito(dados['ticker'])
-        btn_text = "★ Remover" if is_fav else "☆ Favoritar"
-        btn_type = "secondary" if is_fav else "primary"
+    # ====================== TELA 2 - DADOS ======================
+    if st.session_state.mostrar_dados and not st.session_state.mostrar_previsao:
+        dados = st.session_state.dados_acao
         
-        if st.button(btn_text, type=btn_type, use_container_width=True, key="fav_analise"):
-            if is_fav:
-                sucesso, mensagem = remover_favorito(dados['ticker'])
-            else:
-                sucesso, mensagem = adicionar_favorito(dados['ticker'], dados['nome'], dados['preco'])
+        st.markdown("<div class='tela-dados'>", unsafe_allow_html=True)
+        
+        # Header com título
+        # st.markdown(f"<h1 class='main-header2'>📊 {dados['ticker']} - {dados['nome']}</h1>", unsafe_allow_html=True)
+        
+            # Linha do título e botões juntos
+        col_titulo, col_btn_fav, col_btn_prev, col_btn = st.columns([2, 1, 1, 1])
+        with col_titulo:
+            st.markdown("<h4 class='section-title'>Cotação Atual</h4>", unsafe_allow_html=True)
+        with col_btn_fav:
+            # Botão de favoritos
+            is_fav = eh_favorito(dados['ticker'])
+            btn_text = "★ Remover" if is_fav else "☆ Favoritar"
+            btn_type = "secondary" if is_fav else "primary"
             
-            if sucesso:
-                st.success(mensagem)
+            if st.button(btn_text, type=btn_type, use_container_width=True, key="fav_analise"):
+                if is_fav:
+                    sucesso, mensagem = remover_favorito(dados['ticker'])
+                else:
+                    sucesso, mensagem = adicionar_favorito(dados['ticker'], dados['nome'], dados['preco'])
+                
+                if sucesso:
+                    st.success(mensagem)
+                    st.rerun()
+                else:
+                    st.error(mensagem)
+        with col_btn_prev:
+            if st.button("Gerar Previsão", type="secondary", use_container_width=True):
+                st.session_state.mostrar_previsao = True
                 st.rerun()
-            else:
-                st.error(mensagem)
-    with col_btn_prev:
-        if st.button("Gerar Previsão", type="secondary", use_container_width=True):
-            st.session_state.mostrar_previsao = True
-            st.rerun()
-    with col_btn:
-        if st.button("Nova Análise", type="secondary", use_container_width=True):
-            st.session_state.mostrar_dados = False
-            st.session_state.mostrar_previsao = False
-            st.session_state.dados_acao = None
-            st.rerun()
+        with col_btn:
+            if st.button("Nova Análise", type="secondary", use_container_width=True):
+                st.session_state.mostrar_dados = False
+                st.session_state.mostrar_previsao = False
+                st.session_state.dados_acao = None
+                st.rerun()
 
-    # Linha das métricas principais
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        variacao_valor = dados.get('variacao_valor', 0)
-        st.metric("Preço Atual", f"R$ {dados['preco']:.2f}", 
-                 delta=f"R$ {variacao_valor:.2f}")
-    with col2:
-        st.metric("Variação %", f"{dados['variacao']:.2f}%")
-    with col3:
-        st.metric("Máxima do Dia", f"R$ {dados['maxima']:.2f}")
-    with col4:
-        st.metric("Mínima do Dia", f"R$ {dados['minima']:.2f}")
-
-    # Segunda linha - Informações adicionais do dia
-    st.markdown("<h4 class='section-title'>Informações do Pregão</h4>", unsafe_allow_html=True)
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Abertura", f"R$ {dados.get('abertura', 0):.2f}")
-    with col2:
-        fechamento_ant = dados.get('fechamento_anterior', 0)
-        st.metric("Fechamento Anterior", f"R$ {fechamento_ant:.2f}")
-    with col3:
-        volume = dados.get('volume', 0)
-        volume_formatado = f"{volume:,}".replace(",", ".")
-        st.metric("Volume do Dia", volume_formatado)
-    with col4:
-        market_cap = dados.get('market_cap', 0)
-        if market_cap > 0:
-            if market_cap >= 1e9:
-                cap_formatado = f"R$ {market_cap/1e9:.1f}B"
-            elif market_cap >= 1e6:
-                cap_formatado = f"R$ {market_cap/1e6:.1f}M"
-            else:
-                cap_formatado = f"R$ {market_cap:,.0f}".replace(",", ".")
-            st.metric("Market Cap", cap_formatado)
-        else:
-            st.metric("Market Cap", "N/D")
-
-    # Terceira linha - Indicadores técnicos
-    indicadores = dados.get('indicadores', {})
-    if indicadores:
-        st.markdown("<h4 class='section-title'>Indicadores Técnicos</h4>", unsafe_allow_html=True)
+        # Linha das métricas principais
         col1, col2, col3, col4 = st.columns(4)
-        
         with col1:
-            maxima_52s = indicadores.get('maxima_52s')
-            if maxima_52s:
-                st.metric("Máxima 52S", f"R$ {maxima_52s:.2f}")
-            else:
-                st.metric("Máxima 52S", "N/D")
-        
+            variacao_valor = dados.get('variacao_valor', 0)
+            st.metric("Preço Atual", f"R$ {dados['preco']:.2f}", 
+                     delta=f"R$ {variacao_valor:.2f}")
         with col2:
-            minima_52s = indicadores.get('minima_52s')
-            if minima_52s:
-                st.metric("Mínima 52S", f"R$ {minima_52s:.2f}")
-            else:
-                st.metric("Mínima 52S", "N/D")
-        
+            st.metric("Variação %", f"{dados['variacao']:.2f}%")
         with col3:
-            media_20d = indicadores.get('media_20d')
-            if media_20d:
-                st.metric("Média 20D", f"R$ {media_20d:.2f}")
-            else:
-                st.metric("Média 20D", "N/D")
-        
+            st.metric("Máxima do Dia", f"R$ {dados['maxima']:.2f}")
         with col4:
-            volatilidade = indicadores.get('volatilidade')
-            if volatilidade:
-                st.metric("Volatilidade", f"{volatilidade:.1f}%")
-            else:
-                st.metric("Volatilidade", "N/D")
+            st.metric("Mínima do Dia", f"R$ {dados['minima']:.2f}")
 
-    
-    # Linha 2: Dados Históricos (3 colunas + performance)
-    if dados['dados_3_meses']:
-        st.markdown("<h4 class='section-title'>Comparativo 3 Meses</h4 >", unsafe_allow_html=True)
-        
-        d3m = dados['dados_3_meses']
-        
-        col1_hist, col2_hist, col3_hist, col4_hist = st.columns(4)
-        
-        with col1_hist:
-            st.metric("Preço 3M", f"R$ {d3m['preco']:.2f}")
-        with col2_hist:
-            volume_formatado = f"{d3m['volume']:,}".replace(",", ".")
-            st.metric("Volume", volume_formatado)
-        with col3_hist:
-            st.metric("Data", d3m['data'])
-        with col4_hist:
-            # Cálculo de performance
-            if dados['preco'] > 0 and d3m['preco'] > 0:
-                performance = ((dados['preco'] - d3m['preco']) / d3m['preco']) * 100
-                st.metric("Performance 3M", f"{performance:.2f}%")
-    
-    
-    if dados['historico'] is not None:
-        fig_analise = criar_grafico_com_previsao(dados['historico'], dados['ticker'])
-        st.plotly_chart(fig_analise, use_container_width=True)
-    else:
-        st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
-    
-    st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
-
-# ====================== TELA 3 - PREVISÃO ======================
-elif st.session_state.mostrar_previsao:
-    dados = st.session_state.dados_acao
-    
-    st.markdown("<div class='tela-dados'>", unsafe_allow_html=True)
-    
-    # Header com título
-    col_titulo, col_btn_fav, col_btn_volta, col_btn = st.columns([2, 1, 1, 1])
-    with col_titulo:
-        st.markdown("<h4 class='section-title'>Previsão de Preços com IA</h4>", unsafe_allow_html=True)
-    with col_btn_fav:
-        # Botão de favoritos
-        is_fav = eh_favorito(dados['ticker'])
-        btn_text = "★ Remover" if is_fav else "☆ Favoritar"
-        btn_type = "secondary" if is_fav else "primary"
-        
-        if st.button(btn_text, type=btn_type, use_container_width=True, key="fav_previsao"):
-            if is_fav:
-                sucesso, mensagem = remover_favorito(dados['ticker'])
+        # Segunda linha - Informações adicionais do dia
+        st.markdown("<h4 class='section-title'>Informações do Pregão</h4>", unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Abertura", f"R$ {dados.get('abertura', 0):.2f}")
+        with col2:
+            fechamento_ant = dados.get('fechamento_anterior', 0)
+            st.metric("Fechamento Anterior", f"R$ {fechamento_ant:.2f}")
+        with col3:
+            volume = dados.get('volume', 0)
+            volume_formatado = f"{volume:,}".replace(",", ".")
+            st.metric("Volume do Dia", volume_formatado)
+        with col4:
+            market_cap = dados.get('market_cap', 0)
+            if market_cap > 0:
+                if market_cap >= 1e9:
+                    cap_formatado = f"R$ {market_cap/1e9:.1f}B"
+                elif market_cap >= 1e6:
+                    cap_formatado = f"R$ {market_cap/1e6:.1f}M"
+                else:
+                    cap_formatado = f"R$ {market_cap:,.0f}".replace(",", ".")
+                st.metric("Market Cap", cap_formatado)
             else:
-                sucesso, mensagem = adicionar_favorito(dados['ticker'], dados['nome'], dados['preco'])
+                st.metric("Market Cap", "N/D")
+
+        # Terceira linha - Indicadores técnicos
+        indicadores = dados.get('indicadores', {})
+        if indicadores:
+            st.markdown("<h4 class='section-title'>Indicadores Técnicos</h4>", unsafe_allow_html=True)
+            col1, col2, col3, col4 = st.columns(4)
             
-            if sucesso:
-                st.success(mensagem)
+            with col1:
+                maxima_52s = indicadores.get('maxima_52s')
+                if maxima_52s:
+                    st.metric("Máxima 52S", f"R$ {maxima_52s:.2f}")
+                else:
+                    st.metric("Máxima 52S", "N/D")
+            
+            with col2:
+                minima_52s = indicadores.get('minima_52s')
+                if minima_52s:
+                    st.metric("Mínima 52S", f"R$ {minima_52s:.2f}")
+                else:
+                    st.metric("Mínima 52S", "N/D")
+            
+            with col3:
+                media_20d = indicadores.get('media_20d')
+                if media_20d:
+                    st.metric("Média 20D", f"R$ {media_20d:.2f}")
+                else:
+                    st.metric("Média 20D", "N/D")
+            
+            with col4:
+                volatilidade = indicadores.get('volatilidade')
+                if volatilidade:
+                    st.metric("Volatilidade", f"{volatilidade:.1f}%")
+                else:
+                    st.metric("Volatilidade", "N/D")
+
+        
+        # Linha 2: Dados Históricos (3 colunas + performance)
+        if dados['dados_3_meses']:
+            st.markdown("<h4 class='section-title'>Comparativo 3 Meses</h4 >", unsafe_allow_html=True)
+            
+            d3m = dados['dados_3_meses']
+            
+            col1_hist, col2_hist, col3_hist, col4_hist = st.columns(4)
+            
+            with col1_hist:
+                st.metric("Preço 3M", f"R$ {d3m['preco']:.2f}")
+            with col2_hist:
+                volume_formatado = f"{d3m['volume']:,}".replace(",", ".")
+                st.metric("Volume", volume_formatado)
+            with col3_hist:
+                st.metric("Data", d3m['data'])
+            with col4_hist:
+                # Cálculo de performance
+                if dados['preco'] > 0 and d3m['preco'] > 0:
+                    performance = ((dados['preco'] - d3m['preco']) / d3m['preco']) * 100
+                    st.metric("Performance 3M", f"{performance:.2f}%")
+        
+        
+        if dados['historico'] is not None:
+            fig_analise = criar_grafico_com_previsao(dados['historico'], dados['ticker'])
+            st.plotly_chart(fig_analise, use_container_width=True)
+        else:
+            st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
+
+    # ====================== TELA 3 - PREVISÃO ======================
+    if st.session_state.mostrar_previsao:
+        dados = st.session_state.dados_acao
+        
+        st.markdown("<div class='tela-dados'>", unsafe_allow_html=True)
+        
+        # Header com título
+        col_titulo, col_btn_fav, col_btn_volta, col_btn = st.columns([2, 1, 1, 1])
+        with col_titulo:
+            st.markdown("<h4 class='section-title'>Previsão de Preços com IA</h4>", unsafe_allow_html=True)
+        with col_btn_fav:
+            # Botão de favoritos
+            is_fav = eh_favorito(dados['ticker'])
+            btn_text = "★ Remover" if is_fav else "☆ Favoritar"
+            btn_type = "secondary" if is_fav else "primary"
+            
+            if st.button(btn_text, type=btn_type, use_container_width=True, key="fav_previsao"):
+                if is_fav:
+                    sucesso, mensagem = remover_favorito(dados['ticker'])
+                else:
+                    sucesso, mensagem = adicionar_favorito(dados['ticker'], dados['nome'], dados['preco'])
+                
+                if sucesso:
+                    st.success(mensagem)
+                    st.rerun()
+                else:
+                    st.error(mensagem)
+        with col_btn_volta:
+            if st.button("Voltar", type="secondary", use_container_width=True):
+                st.session_state.mostrar_previsao = False
                 st.rerun()
-            else:
-                st.error(mensagem)
-    with col_btn_volta:
-        if st.button("Voltar", type="secondary", use_container_width=True):
-            st.session_state.mostrar_previsao = False
-            st.rerun()
-    with col_btn:
-        if st.button("Nova Análise", type="secondary", use_container_width=True):
-            st.session_state.mostrar_dados = False
-            st.session_state.mostrar_previsao = False
-            st.session_state.dados_acao = None
-            st.rerun()
+        with col_btn:
+            if st.button("Nova Análise", type="secondary", use_container_width=True):
+                st.session_state.mostrar_dados = False
+                st.session_state.mostrar_previsao = False
+                st.session_state.dados_acao = None
+                st.rerun()
 
-    # Gerar previsão usando ML
-    with st.spinner('Gerando previsão com Inteligência Artificial...'):
-        preco_previsto, data_previsao, erro_ml = gerar_previsao_acao(dados)
-    
-    if erro_ml:
-        st.error(f"Erro na previsão: {erro_ml}")
-        st.info("**Dica:** A previsão requer pelo menos 20 dias de histórico com dados de volume.")
-        preco_previsto, data_previsao = None, None
-    else:
-        # Calcular variação prevista
-        variacao_prevista = ((preco_previsto - dados['preco']) / dados['preco']) * 100
+        # Gerar previsão usando ML
+        with st.spinner('Gerando previsão com Inteligência Artificial...'):
+            preco_previsto, data_previsao, erro_ml = gerar_previsao_acao(dados)
         
-        # Exibir resultado da previsão
-        st.success("**Previsão gerada com sucesso!**")
+        if erro_ml:
+            st.error(f"Erro na previsão: {erro_ml}")
+            st.info("**Dica:** A previsão requer pelo menos 20 dias de histórico com dados de volume.")
+            preco_previsto, data_previsao = None, None
+        else:
+            # Calcular variação prevista
+            variacao_prevista = ((preco_previsto - dados['preco']) / dados['preco']) * 100
+            
+            # Exibir resultado da previsão
+            st.success("**Previsão gerada com sucesso!**")
+            
+            col_prev1, col_prev2, col_prev3, col_prev4 = st.columns(4)
+            with col_prev1:
+                st.metric("Previsão IA", f"R$ {preco_previsto:.2f}")
+            with col_prev2:
+                st.metric("Variação Prevista", f"{variacao_prevista:.2f}%")
+            with col_prev3:
+                st.metric("Para o Dia", data_previsao.strftime('%d/%m/%Y'))
+            with col_prev4:
+                confianca = min(85, max(60, 75 + abs(variacao_prevista) * 2))  # Simulação de confiança
+                st.metric("Confiança", f"{confianca:.0f}%")
+
+        # Linha das métricas atuais
+        st.markdown("<h4 class='section-title'>Dados Atuais</h4>", unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Preço Atual", f"R$ {dados['preco']:.2f}")
+        with col2:
+            st.metric("Variação", f"{dados['variacao']:.2f}%")
+        with col3:
+            st.metric("Máxima", f"R$ {dados['maxima']:.2f}")
+        with col4:
+            st.metric("Mínima", f"R$ {dados['minima']:.2f}")
+
+        # Gráfico com previsão
+        if dados['historico'] is not None:
+            fig_previsao = criar_grafico_com_previsao(
+                dados['historico'], 
+                dados['ticker'], 
+                preco_previsto, 
+                data_previsao
+            )
+            st.plotly_chart(fig_previsao, use_container_width=True)
+        else:
+            st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
         
-        col_prev1, col_prev2, col_prev3, col_prev4 = st.columns(4)
-        with col_prev1:
-            st.metric("Previsão IA", f"R$ {preco_previsto:.2f}")
-        with col_prev2:
-            st.metric("Variação Prevista", f"{variacao_prevista:.2f}%")
-        with col_prev3:
-            st.metric("Para o Dia", data_previsao.strftime('%d/%m/%Y'))
-        with col_prev4:
-            confianca = min(85, max(60, 75 + abs(variacao_prevista) * 2))  # Simulação de confiança
-            st.metric("Confiança", f"{confianca:.0f}%")
-
-    # Linha das métricas atuais
-    st.markdown("<h4 class='section-title'>Dados Atuais</h4>", unsafe_allow_html=True)
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Preço Atual", f"R$ {dados['preco']:.2f}")
-    with col2:
-        st.metric("Variação", f"{dados['variacao']:.2f}%")
-    with col3:
-        st.metric("Máxima", f"R$ {dados['maxima']:.2f}")
-    with col4:
-        st.metric("Mínima", f"R$ {dados['minima']:.2f}")
-
-    # Gráfico com previsão
-    if dados['historico'] is not None:
-        fig_previsao = criar_grafico_com_previsao(
-            dados['historico'], 
-            dados['ticker'], 
-            preco_previsto, 
-            data_previsao
-        )
-        st.plotly_chart(fig_previsao, use_container_width=True)
-    else:
-        st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
-    
-    # Informações sobre o modelo
-    if not erro_ml:
-        with st.expander("Sobre a Previsão"):
-            st.markdown("""
-            **Modelo utilizado:** LSTM (Long Short-Term Memory)
-            
-            **Dados analisados:**
-            - Preços de fechamento (sequência adaptativa)
-            - Volume de negociação
-            - Médias móveis (7 e 21 dias)
-            - Variações percentuais
-            - Modelo ajustado para dados disponíveis (20-41 dias)
-            
-            **Aviso importante:**
-            - Esta é uma previsão baseada em padrões históricos
-            - Não constitui recomendação de investimento
-            - Mercados financeiros são imprevisíveis por natureza
-            - Use apenas para fins educacionais e de pesquisa
-            """)
-    
-    st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
+        # Informações sobre o modelo
+        if not erro_ml:
+            with st.expander("Sobre a Previsão"):
+                st.markdown("""
+                **Modelo utilizado:** LSTM (Long Short-Term Memory)
+                
+                **Dados analisados:**
+                - Preços de fechamento (sequência adaptativa)
+                - Volume de negociação
+                - Médias móveis (7 e 21 dias)
+                - Variações percentuais
+                - Modelo ajustado para dados disponíveis (20-41 dias)
+                
+                **Aviso importante:**
+                - Esta é uma previsão baseada em padrões históricos
+                - Não constitui recomendação de investimento
+                - Mercados financeiros são imprevisíveis por natureza
+                - Use apenas para fins educacionais e de pesquisa
+                """)
+        
+        st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
