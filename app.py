@@ -726,27 +726,21 @@ def render_header_logado():
     """Renderiza header para usuário logado"""
     usuario = get_usuario_logado()
     if usuario:
-        # Layout usando colunas do Streamlit com proporções corretas
-        col1, col2, col3 = st.columns([3, 1, 0.5])  # Título, texto usuário, botão
+        # Header simples e limpo
+        col1, col2 = st.columns([4, 1])
         
         with col1:
             st.markdown(f"<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
         
         with col2:
-            # Texto do usuário alinhado à direita
-            st.markdown(f"""
-            <div style='text-align: right; padding-top: 35px;'>
-                <span style='font-weight: 600; color: #ffffff; font-size: 0.9rem;'>Olá, {usuario}</span>
-            </div>
-            """, unsafe_allow_html=True)
+            # Texto do usuário e botão em linha
+            st.markdown(f"<div style='padding-top: 30px; text-align: right; font-weight: 600; font-size: 0.9rem;'>Olá, {usuario}</div>", unsafe_allow_html=True)
         
-        with col3:
-            # Botão logout alinhado com o texto e tamanho compacto
-            st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)  # Espaçamento para alinhar
-            if st.button("Logout", type="secondary", key="logout_btn"):
-                fazer_logout()
-                st.session_state.tela_atual = 'login'
-                st.rerun()
+        # Botão logout fixo no canto superior direito
+        if st.button("Logout", type="secondary", key="logout_btn"):
+            fazer_logout()
+            st.session_state.tela_atual = 'login'
+            st.rerun()
 
 # ====================== CONTROLE DE TELAS ======================
 

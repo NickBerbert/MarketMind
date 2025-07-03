@@ -172,8 +172,8 @@ div.block-container {
     flex-direction: column;
     align-items: center;
     justify-content: flex-start;
-    padding-top: 2rem !important;
-    min-height: 25vh;
+    padding-top: 0.5rem !important;
+    min-height: 20vh;
     text-align: center;
 }
 
@@ -221,12 +221,24 @@ div.block-container {
 
 /* Redução do espaçamento da primeira tela */
 .tela-entrada h3 {
-    margin-bottom: 1rem !important;
+    margin-bottom: 0.5rem !important;
     margin-top: 0 !important;
+    font-size: 1.2rem !important;
 }
 
 .tela-entrada {
-    padding-bottom: 1rem !important;
+    padding-bottom: 0.5rem !important;
+}
+
+/* Input e botão mais compactos */
+.tela-entrada div[data-testid="stForm"] {
+    margin: 0.5rem auto !important;
+}
+
+/* Espaçamento do header principal reduzido */
+.main-header {
+    margin-bottom: 0.5rem !important;
+    padding-bottom: 0 !important;
 }
 
 /* Estilos para cards de favoritos */
@@ -269,20 +281,19 @@ div.block-container {
     margin-bottom: 1rem;
 }
 
-/* Alinhamento e tamanho do botão logout */
+/* Botão logout posicionado no canto superior direito */
 button[data-testid="baseButton-secondary"] {
-    margin-top: 0 !important;
-    font-size: 0.75rem !important;
-    padding: 0.25rem 0.6rem !important;
-    min-height: 28px !important;
-    height: 28px !important;
-    border-radius: 4px !important;
+    position: fixed !important;
+    top: 25px !important;
+    right: 24px !important;
+    font-size: 0.8rem !important;
+    padding: 0.4rem 0.8rem !important;
+    min-height: 32px !important;
+    height: 32px !important;
+    border-radius: 6px !important;
     font-weight: 500 !important;
-}
-
-/* Botão logout específico (se tiver key) */
-button[data-testid="baseButton-secondary"]:has-text("Logout") {
+    z-index: 1000 !important;
     width: auto !important;
-    max-width: 70px !important;
+    min-width: 70px !important;
 }
 
