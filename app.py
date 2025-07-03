@@ -726,12 +726,18 @@ def render_header_logado():
     """Renderiza header para usuário logado"""
     usuario = get_usuario_logado()
     if usuario:
-        col1, col2 = st.columns([4, 1])
+        # Header com título fixo removido - será adicionado estaticamente
+        col1, col2 = st.columns([1, 1])
         with col1:
             st.markdown(f"<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"**Olá, {usuario}**")
-            if st.button("Logout", type="secondary"):
+            # Container para o usuário e logout lado a lado
+            st.markdown(f"""
+            <div style='display: flex; align-items: center; justify-content: flex-end; margin-top: 20px;'>
+                <span style='margin-right: 10px; font-weight: 600;'>Olá, {usuario}</span>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Logout", type="secondary", key="logout_btn"):
                 fazer_logout()
                 st.session_state.tela_atual = 'login'
                 st.rerun()
@@ -792,62 +798,103 @@ else:
             st.markdown("---")  # Linha divisória sutil
             st.markdown("### Favoritos")
             
-            # Mostrar favoritos em grid 2x3 para melhor visualização
-            cols = st.columns(2)  # 2 colunas principais
-            
-            for i, fav in enumerate(favoritos[:4]):  # Máximo 4 favoritos na tela inicial
-                with cols[i % 2]:
-                    # Buscar dados rápidos
-                    dados_rapidos = buscar_dados_rapidos(fav['ticker'])
-                    
-                    # Card de informações
-                    if dados_rapidos['sucesso']:
-                        # Card com informações
-                        variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
+            # Reorganizar favoritos em layout melhor - dois por linha
+            for i in range(0, min(4, len(favoritos)), 2):  # Máximo 4 favoritos, 2 por linha
+                cols = st.columns(2)
+                
+                # Primeiro favorito da linha
+                if i < len(favoritos):
+                    with cols[0]:
+                        fav = favoritos[i]
+                        # Buscar dados rápidos
+                        dados_rapidos = buscar_dados_rapidos(fav['ticker'])
                         
-                        card_content = f"""
-                        <div class='favorite-card'>
-                            <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
-                            <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
-                            <div style='font-size: 0.9em; font-weight: 500; color: {"#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
-                        </div>
-                        """
-                        st.markdown(card_content, unsafe_allow_html=True)
-                    else:
-                        # Card simples sem dados atualizados
-                        card_content = f"""
-                        <div class='favorite-card' style='background: rgba(21, 37, 36, 0.4);'>
-                            <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
-                            <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
-                        </div>
-                        """
-                        st.markdown(card_content, unsafe_allow_html=True)
-                
-                # Botões embaixo do card
-                btn_col1, btn_col2 = st.columns(2)
-                
-                with btn_col1:
-                    # Botão de análise
-                    if st.button("Analisar", key=f"analyze_{fav['ticker']}", use_container_width=True, type="primary"):
-                        # Carregar dados completos da ação favorita
-                        dados, erro = buscar_dados_acao(fav['ticker'])
-                        if erro:
-                            st.error(f"Erro: {erro}")
+                        # Card de informações
+                        if dados_rapidos['sucesso']:
+                            variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
+                            card_content = f"""
+                            <div class='favorite-card'>
+                                <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
+                                <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
+                                <div style='font-size: 0.9em; font-weight: 500; color: {"#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
+                            </div>
+                            """
                         else:
-                            st.session_state.dados_acao = dados
-                            st.session_state.mostrar_dados = True
-                            st.session_state.mostrar_previsao = False
-                            st.rerun()
+                            card_content = f"""
+                            <div class='favorite-card' style='background: rgba(21, 37, 36, 0.4);'>
+                                <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
+                                <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
+                            </div>
+                            """
+                        st.markdown(card_content, unsafe_allow_html=True)
+                        
+                        # Botões do primeiro favorito
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            if st.button("Analisar", key=f"analyze_{fav['ticker']}", use_container_width=True, type="primary"):
+                                dados, erro = buscar_dados_acao(fav['ticker'])
+                                if erro:
+                                    st.error(f"Erro: {erro}")
+                                else:
+                                    st.session_state.dados_acao = dados
+                                    st.session_state.mostrar_dados = True
+                                    st.session_state.mostrar_previsao = False
+                                    st.rerun()
+                        with btn_col2:
+                            if st.button("Remover", key=f"remove_{fav['ticker']}", use_container_width=True, type="secondary"):
+                                sucesso, mensagem = remover_favorito(fav['ticker'])
+                                if sucesso:
+                                    st.success(mensagem)
+                                    st.rerun()
+                                else:
+                                    st.error(mensagem)
                 
-                with btn_col2:
-                    # Botão de remoção
-                    if st.button("Remover", key=f"remove_{fav['ticker']}", use_container_width=True, type="secondary"):
-                        sucesso, mensagem = remover_favorito(fav['ticker'])
-                        if sucesso:
-                            st.success(mensagem)
-                            st.rerun()
+                # Segundo favorito da linha (se existir)
+                if i + 1 < len(favoritos):
+                    with cols[1]:
+                        fav = favoritos[i + 1]
+                        # Buscar dados rápidos
+                        dados_rapidos = buscar_dados_rapidos(fav['ticker'])
+                        
+                        # Card de informações
+                        if dados_rapidos['sucesso']:
+                            variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
+                            card_content = f"""
+                            <div class='favorite-card'>
+                                <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
+                                <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
+                                <div style='font-size: 0.9em; font-weight: 500; color: {"#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
+                            </div>
+                            """
                         else:
-                            st.error(mensagem)
+                            card_content = f"""
+                            <div class='favorite-card' style='background: rgba(21, 37, 36, 0.4);'>
+                                <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
+                                <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
+                            </div>
+                            """
+                        st.markdown(card_content, unsafe_allow_html=True)
+                        
+                        # Botões do segundo favorito
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            if st.button("Analisar", key=f"analyze_{fav['ticker']}", use_container_width=True, type="primary"):
+                                dados, erro = buscar_dados_acao(fav['ticker'])
+                                if erro:
+                                    st.error(f"Erro: {erro}")
+                                else:
+                                    st.session_state.dados_acao = dados
+                                    st.session_state.mostrar_dados = True
+                                    st.session_state.mostrar_previsao = False
+                                    st.rerun()
+                        with btn_col2:
+                            if st.button("Remover", key=f"remove_{fav['ticker']}", use_container_width=True, type="secondary"):
+                                sucesso, mensagem = remover_favorito(fav['ticker'])
+                                if sucesso:
+                                    st.success(mensagem)
+                                    st.rerun()
+                                else:
+                                    st.error(mensagem)
         
         # Se há mais de 4 favoritos, mostrar contador
         if len(favoritos) > 4:
