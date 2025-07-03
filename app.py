@@ -741,9 +741,9 @@ def render_header_logado():
             """, unsafe_allow_html=True)
         
         with col3:
-            # Botão logout alinhado com o texto
+            # Botão logout alinhado com o texto e tamanho compacto
             st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)  # Espaçamento para alinhar
-            if st.button("Logout", type="secondary", key="logout_btn", use_container_width=True):
+            if st.button("Logout", type="secondary", key="logout_btn"):
                 fazer_logout()
                 st.session_state.tela_atual = 'login'
                 st.rerun()
