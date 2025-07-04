@@ -810,50 +810,40 @@ else:
                             fav = favoritos[fav_index]
                             dados_rapidos = buscar_dados_rapidos(fav['ticker'])
                             
-                            # Card com botões integrados à direita
-                            if dados_rapidos['sucesso']:
-                                variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
-                                variacao_cor = "#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"
-                                
-                                card_html = f"""
-                                <div class='favorite-card-with-buttons'>
-                                    <div style='display: flex; justify-content: space-between; align-items: center; padding: 16px;'>
-                                        <div style='flex: 1;'>
+                            # Card com layout horizontal - informações e botões lado a lado
+                            card_col1, card_col2 = st.columns([3, 1])
+                            
+                            with card_col1:
+                                # Card com informações
+                                if dados_rapidos['sucesso']:
+                                    variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
+                                    variacao_cor = "#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"
+                                    
+                                    card_html = f"""
+                                    <div class='favorite-card-integrated'>
+                                        <div style='padding: 16px;'>
                                             <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
                                             <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
                                             <div style='font-size: 0.9em; font-weight: 500; color: {variacao_cor};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
                                         </div>
-                                        <div style='display: flex; flex-direction: column; gap: 8px; margin-left: 16px;'>
-                                            <div class='card-button-placeholder' data-action='analyze' data-ticker='{fav['ticker']}'></div>
-                                            <div class='card-button-placeholder' data-action='remove' data-ticker='{fav['ticker']}'></div>
-                                        </div>
                                     </div>
-                                </div>
-                                """
-                            else:
-                                card_html = f"""
-                                <div class='favorite-card-with-buttons' style='background: rgba(21, 37, 36, 0.4);'>
-                                    <div style='display: flex; justify-content: space-between; align-items: center; padding: 16px;'>
-                                        <div style='flex: 1;'>
+                                    """
+                                else:
+                                    card_html = f"""
+                                    <div class='favorite-card-integrated' style='background: rgba(21, 37, 36, 0.4);'>
+                                        <div style='padding: 16px;'>
                                             <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
                                             <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
                                         </div>
-                                        <div style='display: flex; flex-direction: column; gap: 8px; margin-left: 16px;'>
-                                            <div class='card-button-placeholder' data-action='analyze' data-ticker='{fav['ticker']}'></div>
-                                            <div class='card-button-placeholder' data-action='remove' data-ticker='{fav['ticker']}'></div>
-                                        </div>
                                     </div>
-                                </div>
-                                """
+                                    """
+                                
+                                st.markdown(card_html, unsafe_allow_html=True)
                             
-                            st.markdown(card_html, unsafe_allow_html=True)
-                            
-                            # Botões compactos posicionados à direita do card
-                            col_spacer, col_buttons = st.columns([3, 1])
-                            with col_spacer:
-                                pass  # Espaço vazio para alinhar botões à direita
-                            with col_buttons:
-                                if st.button("📈", key=f"analyze_{fav['ticker']}", help="Analisar ação", use_container_width=True):
+                            with card_col2:
+                                # Botões integrados ao card
+                                st.markdown("<div style='padding-top: 16px;'></div>", unsafe_allow_html=True)
+                                if st.button("📈", key=f"analyze_{fav['ticker']}", help="Analisar", use_container_width=True):
                                     dados, erro = buscar_dados_acao(fav['ticker'])
                                     if erro:
                                         st.error(f"Erro: {erro}")
@@ -862,7 +852,7 @@ else:
                                         st.session_state.mostrar_dados = True
                                         st.session_state.mostrar_previsao = False
                                         st.rerun()
-                                if st.button("❌", key=f"remove_{fav['ticker']}", help="Remover dos favoritos", use_container_width=True):
+                                if st.button("❌", key=f"remove_{fav['ticker']}", help="Remover", use_container_width=True):
                                     sucesso, mensagem = remover_favorito(fav['ticker'])
                                     if sucesso:
                                         st.success(mensagem)

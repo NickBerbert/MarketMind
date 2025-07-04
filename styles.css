@@ -279,42 +279,60 @@ div.block-container {
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-/* Botões dos favoritos - compactos e integrados ao lado direito */
-.favorite-card-with-buttons {
-    position: relative;
-    min-height: 100px;
-}
-
-/* Container dos botões */
-.favorite-card-with-buttons + div {
-    position: absolute;
-    top: 50%;
-    right: 16px;
-    transform: translateY(-50%);
+/* Cards de favoritos integrados */
+.favorite-card-integrated {
+    border: 1px solid #333;
+    border-radius: 12px;
+    margin: 8px 0 16px 0;
+    background: rgba(21, 37, 36, 0.7);
+    transition: all 0.2s ease;
+    font-family: 'Poppins', sans-serif;
+    height: 100px;
     display: flex;
-    flex-direction: column;
-    gap: 6px;
-    z-index: 10;
+    align-items: center;
 }
 
-/* Estilo individual dos botões */
-.favorite-card-with-buttons + div .stButton {
-    width: 40px !important;
-    height: 32px !important;
+.favorite-card-integrated:hover {
+    border-color: #00d4ff;
+    background: rgba(21, 37, 36, 0.9);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-.favorite-card-with-buttons + div .stButton > button {
-    font-size: 1rem !important;
-    padding: 4px !important;
-    height: 32px !important;
-    width: 40px !important;
-    border-radius: 6px !important;
+/* Container dos botões que simula parte do card */
+.favorite-card-integrated ~ div {
+    margin-top: -16px !important;
+    margin-left: 8px !important;
+}
+
+/* Botões dos favoritos - integrados visualmente ao card */
+.favorite-card-integrated ~ div .stButton {
+    margin-bottom: 0.4rem !important;
+}
+
+.favorite-card-integrated ~ div .stButton > button {
+    font-size: 1.1rem !important;
+    padding: 6px !important;
+    height: 36px !important;
+    width: 100% !important;
+    border-radius: 0 12px 12px 0 !important;
     font-weight: 500 !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     margin: 0 !important;
-    min-height: 32px !important;
+    border-left: none !important;
+}
+
+/* Primeiro botão */
+.favorite-card-integrated ~ div .stButton:first-child > button {
+    border-radius: 0 12px 0 0 !important;
+    border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+}
+
+/* Segundo botão */
+.favorite-card-integrated ~ div .stButton:last-child > button {
+    border-radius: 0 12px 12px 0 !important;
 }
 
 /* Espaçamento para botões dos favoritos */
