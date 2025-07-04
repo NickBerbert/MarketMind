@@ -279,60 +279,36 @@ div.block-container {
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-/* Cards de favoritos integrados */
-.favorite-card-integrated {
+/* Cards de favoritos com botões internos */
+.favorite-card-with-internal-buttons {
     border: 1px solid #333;
     border-radius: 12px;
     margin: 8px 0 16px 0;
     background: rgba(21, 37, 36, 0.7);
     transition: all 0.2s ease;
     font-family: 'Poppins', sans-serif;
-    height: 100px;
-    display: flex;
-    align-items: center;
 }
 
-.favorite-card-integrated:hover {
+.favorite-card-with-internal-buttons:hover {
     border-color: #00d4ff;
     background: rgba(21, 37, 36, 0.9);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-/* Container dos botões que simula parte do card */
-.favorite-card-integrated ~ div {
-    margin-top: -16px !important;
-    margin-left: 8px !important;
+/* Hover effects para botões dentro do card */
+.favorite-card-with-internal-buttons button:hover {
+    transform: scale(1.05);
+    transition: transform 0.2s ease;
 }
 
-/* Botões dos favoritos - integrados visualmente ao card */
-.favorite-card-integrated ~ div .stButton {
-    margin-bottom: 0.4rem !important;
-}
-
-.favorite-card-integrated ~ div .stButton > button {
-    font-size: 1.1rem !important;
-    padding: 6px !important;
-    height: 36px !important;
-    width: 100% !important;
-    border-radius: 0 12px 12px 0 !important;
-    font-weight: 500 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    margin: 0 !important;
-    border-left: none !important;
-}
-
-/* Primeiro botão */
-.favorite-card-integrated ~ div .stButton:first-child > button {
-    border-radius: 0 12px 0 0 !important;
-    border-bottom: 1px solid rgba(255,255,255,0.1) !important;
-}
-
-/* Segundo botão */
-.favorite-card-integrated ~ div .stButton:last-child > button {
-    border-radius: 0 12px 12px 0 !important;
+/* Esconder botões Streamlit dos favoritos */
+button[title="Analisar"],
+button[title="Remover"] {
+    display: none !important;
+    position: absolute !important;
+    left: -9999px !important;
+    visibility: hidden !important;
 }
 
 /* Espaçamento para botões dos favoritos */
