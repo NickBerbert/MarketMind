@@ -1,34 +1,20 @@
-/* =============================================================================
-   MARKETMIND - ESTILOS PRINCIPAIS
-   Arquivo CSS limpo e comentado para aplicação Streamlit de análise de ações
-   ============================================================================= */
-
-/* Importação de fontes estéticas */
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* Aplicação da fonte Poppins (mais estética) em toda a aplicação */
 * {
     font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
 }
 
-/* Melhoria específica para textos */
 body, html, div, p, span, h1, h2, h3, h4, h5, h6 {
     font-family: 'Poppins', sans-serif !important;
     letter-spacing: -0.01em;
 }
 
-/* -----------------------------------------------------------------------------
-   REMOÇÃO DE ELEMENTOS STREAMLIT DESNECESSÁRIOS
-   ----------------------------------------------------------------------------- */
 header[data-testid="stHeader"], 
 footer, 
 .stDeployButton { 
     display: none !important; 
 }
 
-/* -----------------------------------------------------------------------------
-   REMOÇÃO DA BORDA DO FORMULÁRIO (SOLUÇÃO TESTADA)
-   ----------------------------------------------------------------------------- */
 div[data-testid="stForm"] {
     border: none !important;
     box-shadow: none !important;
@@ -47,9 +33,6 @@ div[data-testid="stForm"] form {
     background: transparent !important;
 }
 
-/* -----------------------------------------------------------------------------
-   TÍTULO PRINCIPAL DA APLICAÇÃO
-   ----------------------------------------------------------------------------- */
 .main-header { 
     text-align: left; 
     position: relative;
@@ -73,31 +56,21 @@ div[data-testid="stForm"] form {
     font-size: 2.5rem;
 }
 
-/* -----------------------------------------------------------------------------
-   LAYOUT DAS TELAS
-   ----------------------------------------------------------------------------- */
-
-/* Tela inicial de entrada */
 .tela-entrada {
     animation: fadeIn 0.8s ease-in;
     text-align: center;
     padding: 2rem 0;
 }
 
-/* Tela de exibição de dados */
 .tela-dados {
     animation: slideUp 0.6s ease-out;
 }
 
-/* Container para dados de 3 meses atrás */
 .dados-antigos {
     padding: 0.5rem !important;
     margin: 0.5rem 0 !important;
 }
 
-/* -----------------------------------------------------------------------------
-   COMPONENTES DE MÉTRICAS
-   ----------------------------------------------------------------------------- */
 .stMetric {
     background-color: #152524;
     padding: 0.2rem;
@@ -132,9 +105,6 @@ div[data-testid="stForm"] form {
     padding-top: 0.25rem !important;
 }
 
-/* -----------------------------------------------------------------------------
-   ANIMAÇÕES
-   ----------------------------------------------------------------------------- */
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
@@ -149,7 +119,6 @@ div[data-testid="stForm"] form {
     font-size: 1.1rem !important;
     margin-bottom: 0.5rem !important;
 }
-
 
 div.block-container {
     padding-top: 0 !important;
@@ -189,24 +158,24 @@ div.block-container {
     margin-right: auto;
 }
 
-/* Estilização específica do formulário na tela inicial */
 .tela-entrada div[data-testid="stForm"] .stButton {
     text-align: right !important;
     margin-top: 1rem !important;
     width: 100% !important;
     display: block !important;
 }
+
 .tela-entrada div[data-testid="stForm"] .stButton button {
     width: 120px !important;
     min-width: 80px !important;
     max-width: 160px !important;
 }
+
 .tela-dados .stPlotlyChart {
     margin-top: 0.5rem !important;
     margin-bottom: 0 !important;
 }
 
-/* Centraliza o formulário e alinha o botão à direita */
 .tela-entrada div[data-testid="stForm"] {
     width: 320px !important;
     margin: 1rem auto !important;
@@ -219,7 +188,6 @@ div.block-container {
     width: 100% !important;
 }
 
-/* Redução do espaçamento da primeira tela */
 .tela-entrada h3 {
     margin-bottom: 0.5rem !important;
     margin-top: 0 !important;
@@ -230,18 +198,15 @@ div.block-container {
     padding-bottom: 0.5rem !important;
 }
 
-/* Input e botão mais compactos */
 .tela-entrada div[data-testid="stForm"] {
     margin: 0.5rem auto !important;
 }
 
-/* Espaçamento do header principal reduzido */
 .main-header {
     margin-bottom: 0.5rem !important;
     padding-bottom: 0 !important;
 }
 
-/* Estilos para cards de favoritos */
 .favorite-card {
     border: 1px solid #333;
     border-radius: 12px;
@@ -261,7 +226,6 @@ div.block-container {
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-/* Cards com botões integrados */
 .favorite-card-with-buttons {
     border: 1px solid #333;
     border-radius: 12px;
@@ -279,7 +243,6 @@ div.block-container {
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-/* Botões pequenos dos favoritos */
 button[data-testid*="analyze_btn_"],
 button[data-testid*="remove_btn_"] {
     height: 24px !important;
@@ -296,7 +259,6 @@ button[data-testid*="remove_btn_"] {
     box-shadow: none !important;
 }
 
-/* Botão analisar */
 button[data-testid*="analyze_btn_"] {
     color: #00d4ff !important;
 }
@@ -306,7 +268,6 @@ button[data-testid*="analyze_btn_"]:hover {
     transform: scale(1.1) !important;
 }
 
-/* Botão remover */
 button[data-testid*="remove_btn_"] {
     color: #ff4444 !important;
 }
@@ -316,7 +277,6 @@ button[data-testid*="remove_btn_"]:hover {
     transform: scale(1.1) !important;
 }
 
-/* Esconder botões Streamlit dos favoritos mantendo-os clicáveis */
 button[data-testid*="hidden_analyze_"],
 button[data-testid*="hidden_remove_"],
 button[title="Analisar"],
@@ -335,18 +295,15 @@ button[title="Remover"] {
     pointer-events: auto !important;
 }
 
-/* Esconder botões com emojis específicos */
 button:has-text("🔍"),
 button:has-text("🗑") {
     display: none !important;
 }
 
-/* Regra mais abrangente para esconder botões dos favoritos */
 .stButton button[data-testid*="hidden_"] {
     display: none !important;
 }
 
-/* Esconder qualquer botão que contenha 'hidden' no key */
 button[data-testid*="hidden"] {
     display: none !important;
     position: fixed !important;
@@ -354,7 +311,6 @@ button[data-testid*="hidden"] {
     top: -10000px !important;
 }
 
-/* Esconder botões com emojis específicos em favoritos */
 .tela-entrada button:contains("🔍"),
 .tela-entrada button:contains("🗑"),
 .screen-entrada button:contains("🔍"),
@@ -363,18 +319,15 @@ button[data-testid*="hidden"] {
     visibility: hidden !important;
 }
 
-/* Esconder divs de colunas que contenham botões ocultos */
 .stColumns > div:has(button[data-testid*="hidden_"]) {
     display: none !important;
 }
 
-/* Esconder elementos que contenham botões ocultos */
 div:has(button[data-testid*="hidden_analyze_"]),
 div:has(button[data-testid*="hidden_remove_"]) {
     display: none !important;
 }
 
-/* Esconder containers com botões ocultos */
 .stContainer:has(button[data-testid*="hidden_"]) {
     display: none !important;
     visibility: hidden !important;
@@ -382,13 +335,11 @@ div:has(button[data-testid*="hidden_remove_"]) {
     left: -9999px !important;
 }
 
-/* Espaçamento para botões dos favoritos */
 .stButton > button {
     margin-top: 0.5rem !important;
     font-size: 0.85rem !important;
 }
 
-/* Estilo para o header do usuário logado */
 .user-header {
     display: flex;
     align-items: center;
@@ -397,18 +348,15 @@ div:has(button[data-testid*="hidden_remove_"]) {
     margin-bottom: 1rem;
 }
 
-/* Dropdown do usuário estilizado */
 [data-testid="stSelectbox"]:has(select[aria-label*="user_dropdown"]),
 select[data-testid*="user_dropdown"] {
     text-align: right !important;
 }
 
-/* Container do dropdown alinhado à direita */
 div:has(select[aria-label=""]) {
     text-align: right !important;
 }
 
-/* Estilizar o selectbox do usuário */
 div[data-testid="stSelectbox"] select {
     font-size: 0.9rem !important;
     font-weight: 600 !important;
@@ -419,7 +367,6 @@ div[data-testid="stSelectbox"] select {
     padding-right: 20px !important;
 }
 
-/* Remover a seta do dropdown quando não está expandido */
 div[data-testid="stSelectbox"] {
     text-align: right !important;
 }

@@ -19,7 +19,6 @@ from datetime import datetime
 from io import BytesIO
 warnings.filterwarnings('ignore')
 
-# Configuração da página
 st.set_page_config(
     page_title="MarketMind",
     page_icon="🧠",
@@ -27,7 +26,6 @@ st.set_page_config(
 )
 
 def load_css():
-    """Carrega o arquivo CSS externo"""
     css_file = Path(__file__).parent / "styles.css"
     if css_file.exists():
         with open(css_file, 'r', encoding='utf-8') as f:
@@ -35,15 +33,11 @@ def load_css():
     else:
         st.warning("⚠️ Arquivo styles.css não encontrado")
 
-# Carregar CSS
 load_css()
-
-# ====================== SISTEMA DE AUTENTICAÇÃO ======================
 USERS_FILE = "usuarios.json"
 FAVORITES_DIR = "favoritos_usuarios"
 
 def carregar_usuarios():
-    """Carrega a lista de usuários do arquivo JSON"""
     try:
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, 'r', encoding='utf-8') as f:
@@ -53,7 +47,6 @@ def carregar_usuarios():
         return {}
 
 def salvar_usuarios(usuarios):
-    """Salva a lista de usuários no arquivo JSON"""
     try:
         with open(USERS_FILE, 'w', encoding='utf-8') as f:
             json.dump(usuarios, f, ensure_ascii=False, indent=2)
@@ -62,31 +55,25 @@ def salvar_usuarios(usuarios):
         return False
 
 def hash_password(password):
-    """Simples hash da senha (em produção usar bcrypt)"""
     import hashlib
     return hashlib.sha256(password.encode()).hexdigest()
 
 def criar_usuario(username, email, password):
-    """Cria um novo usuário"""
     usuarios = carregar_usuarios()
     
-    # Verificar se usuário já existe
     if username in usuarios:
         return False, "Usuário já existe"
     
-    # Verificar se email já existe
     for user_data in usuarios.values():
         if user_data.get('email') == email:
             return False, "Email já cadastrado"
     
-    # Criar novo usuário
     usuarios[username] = {
         'email': email,
         'password': hash_password(password),
         'data_criacao': datetime.now().strftime('%d/%m/%Y %H:%M')
     }
     
-    # Criar diretório de favoritos se não existir
     if not os.path.exists(FAVORITES_DIR):
         os.makedirs(FAVORITES_DIR)
     
@@ -96,7 +83,6 @@ def criar_usuario(username, email, password):
         return False, "Erro ao criar usuário"
 
 def autenticar_usuario(username, password):
-    """Autentica um usuário"""
     usuarios = carregar_usuarios()
     
     if username not in usuarios:
@@ -108,15 +94,12 @@ def autenticar_usuario(username, password):
     return True, "Login realizado com sucesso"
 
 def get_usuario_logado():
-    """Retorna o usuário atualmente logado"""
     return st.session_state.get('usuario_logado', None)
 
 def fazer_login(username):
-    """Fazer login do usuário"""
     st.session_state.usuario_logado = username
 
 def fazer_logout():
-    """Fazer logout do usuário"""
     if 'usuario_logado' in st.session_state:
         del st.session_state.usuario_logado
     if 'dados_acao' in st.session_state:
@@ -126,14 +109,10 @@ def fazer_logout():
     if 'mostrar_previsao' in st.session_state:
         del st.session_state.mostrar_previsao
 
-# ====================== SISTEMA DE FAVORITOS POR USUÁRIO ======================
-
 def get_favorites_file(username):
-    """Retorna o caminho do arquivo de favoritos para o usuário"""
     return os.path.join(FAVORITES_DIR, f"{username}_favoritos.json")
 
 def carregar_favoritos(username=None):
-    """Carrega a lista de favoritos do usuário"""
     if username is None:
         username = get_usuario_logado()
     
@@ -150,7 +129,6 @@ def carregar_favoritos(username=None):
         return []
 
 def salvar_favoritos(favoritos, username=None):
-    """Salva a lista de favoritos do usuário"""
     if username is None:
         username = get_usuario_logado()
     
@@ -158,7 +136,6 @@ def salvar_favoritos(favoritos, username=None):
         return False
     
     try:
-        # Criar diretório se não existir
         if not os.path.exists(FAVORITES_DIR):
             os.makedirs(FAVORITES_DIR)
         
@@ -170,19 +147,16 @@ def salvar_favoritos(favoritos, username=None):
         return False
 
 def adicionar_favorito(ticker, nome, preco):
-    """Adiciona uma ação aos favoritos do usuário logado"""
     username = get_usuario_logado()
     if username is None:
         return False, "Usuário não está logado"
     
     favoritos = carregar_favoritos(username)
     
-    # Verificar se já existe
     for fav in favoritos:
         if fav['ticker'] == ticker:
             return False, "Ação já está nos favoritos"
     
-    # Adicionar novo favorito
     novo_favorito = {
         'ticker': ticker,
         'nome': nome,
@@ -198,7 +172,6 @@ def adicionar_favorito(ticker, nome, preco):
         return False, "Erro ao salvar favorito"
 
 def remover_favorito(ticker):
-    """Remove uma ação dos favoritos do usuário logado"""
     username = get_usuario_logado()
     if username is None:
         return False, "Usuário não está logado"
@@ -212,7 +185,6 @@ def remover_favorito(ticker):
         return False, "Erro ao remover favorito"
 
 def eh_favorito(ticker):
-    """Verifica se uma ação está nos favoritos do usuário logado"""
     username = get_usuario_logado()
     if username is None:
         return False
@@ -221,7 +193,6 @@ def eh_favorito(ticker):
     return any(fav['ticker'] == ticker for fav in favoritos)
 
 def buscar_dados_rapidos(ticker):
-    """Busca apenas dados essenciais para exibição rápida dos favoritos"""
     try:
         API_KEY = "nUUZxG2ZdAWuSkBDhPobC2"
         headers = {"Authorization": f"Bearer {API_KEY}"}
@@ -244,24 +215,18 @@ def buscar_dados_rapidos(ticker):
     return {'preco': 0, 'variacao': 0, 'sucesso': False}
 
 def preparar_dados_ensemble(historico_df, dias_previsao=14):
-    """
-    Prepara dados históricos para ensemble de modelos (previsão de 2 semanas)
-    """
     try:
         if historico_df is None or historico_df.empty:
             return None, None, None, None, "Dados históricos insuficientes"
         
-        # Criar features técnicas
         df = historico_df.copy()
         
-        # Features básicas
         df['Close_MA7'] = df['Close'].rolling(window=7).mean()
         df['Close_MA21'] = df['Close'].rolling(window=21).mean()
         df['Price_Change'] = df['Close'].pct_change()
         df['Volume_MA7'] = df['Volume'].rolling(window=7).mean()
         df['Volatility'] = df['Close'].rolling(window=14).std()
         
-        # Features avançadas
         df['RSI'] = calcular_rsi(df['Close'])
         df['MACD'] = calcular_macd(df['Close'])
         df['BB_upper'], df['BB_lower'] = calcular_bollinger_bands(df['Close'])
@@ -269,52 +234,43 @@ def preparar_dados_ensemble(historico_df, dias_previsao=14):
         df['Close_lag2'] = df['Close'].shift(2)
         df['Volume_Change'] = df['Volume'].pct_change()
         
-        # Remover NaNs
         df = df.dropna()
         
         dias_disponveis = len(df)
-        if dias_disponveis < 25:  # Mínimo reduzido para funcionar com API
+        if dias_disponveis < 25:
             return None, None, None, None, f"Histórico insuficiente: {dias_disponveis} dias (mínimo: 25)"
         
-        # Features para modelos tradicionais (não sequenciais)
         feature_cols = ['Close_MA7', 'Close_MA21', 'Price_Change', 'Volume_MA7', 
                        'Volatility', 'RSI', 'MACD', 'BB_upper', 'BB_lower',
                        'Close_lag1', 'Close_lag2', 'Volume_Change']
         
-        # Preparar dados para modelos tradicionais
         X_traditional = df[feature_cols].values
         
-        # Preparar dados para LSTM (sequenciais) - ajustado para dados limitados
-        sequence_length = min(15, int(dias_disponveis * 0.4))  # Sequência menor
+        sequence_length = min(15, int(dias_disponveis * 0.4))
         lstm_features = ['Close', 'Volume', 'Close_MA7', 'Close_MA21', 'Price_Change']
         lstm_data = df[lstm_features].values
         
-        # Normalizar dados
         scaler_traditional = MinMaxScaler()
         scaler_lstm = MinMaxScaler()
         
         X_traditional_scaled = scaler_traditional.fit_transform(X_traditional)
         lstm_data_scaled = scaler_lstm.fit_transform(lstm_data)
         
-        # Criar targets para múltiplos dias (2 semanas = 14 dias)
         y_multi = []
         X_traditional_final = []
         X_lstm_final = []
         
         for i in range(len(df) - dias_previsao):
-            # Target: próximos 14 preços
             future_prices = df['Close'].iloc[i+1:i+1+dias_previsao].values
             if len(future_prices) == dias_previsao:
                 y_multi.append(future_prices)
                 X_traditional_final.append(X_traditional_scaled[i])
                 
-                # Para LSTM: sequência até o ponto atual
                 if i >= sequence_length:
                     X_lstm_final.append(lstm_data_scaled[i-sequence_length:i])
         
-        # Ajustar arrays para mesmo tamanho
         min_samples = min(len(X_traditional_final), len(X_lstm_final))
-        if min_samples < 10:  # Reduzido para funcionar com dados limitados
+        if min_samples < 10:
             return None, None, None, None, "Dados insuficientes para treinamento"
         
         X_traditional_final = np.array(X_traditional_final[-min_samples:])
@@ -327,7 +283,6 @@ def preparar_dados_ensemble(historico_df, dias_previsao=14):
         return None, None, None, None, f"Erro ao preparar dados: {str(e)}"
 
 def calcular_rsi(prices, period=14):
-    """Calcula RSI (Relative Strength Index)"""
     delta = prices.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -336,14 +291,12 @@ def calcular_rsi(prices, period=14):
     return rsi.fillna(50)
 
 def calcular_macd(prices, fast=12, slow=26):
-    """Calcula MACD"""
     ema_fast = prices.ewm(span=fast).mean()
     ema_slow = prices.ewm(span=slow).mean()
     macd = ema_fast - ema_slow
     return macd.fillna(0)
 
 def calcular_bollinger_bands(prices, window=20, std_dev=2):
-    """Calcula Bandas de Bollinger"""
     ma = prices.rolling(window=window).mean()
     std = prices.rolling(window=window).std()
     upper = ma + (std * std_dev)
@@ -351,32 +304,24 @@ def calcular_bollinger_bands(prices, window=20, std_dev=2):
     return upper.fillna(prices), lower.fillna(prices)
 
 def gerar_relatorio_previsao(dados_acao, previsoes_ensemble, datas_previsao, detalhes_previsoes):
-    """
-    Gera relatório textual da previsão para download
-    """
     try:
         ticker = dados_acao['ticker']
         nome = dados_acao['nome']
         preco_atual = dados_acao['preco']
         variacao_atual = dados_acao['variacao']
         
-        # Calcular métricas das previsões
-        preco_1_semana = previsoes_ensemble[4]  # Dia 5
-        preco_2_semanas = previsoes_ensemble[13]  # Dia 14
+        preco_1_semana = previsoes_ensemble[4]
+        preco_2_semanas = previsoes_ensemble[13]
         variacao_1_semana = ((preco_1_semana - preco_atual) / preco_atual) * 100
         variacao_2_semanas = ((preco_2_semanas - preco_atual) / preco_atual) * 100
         
-        # Determinar tendência
         tendencia = "ALTA" if preco_2_semanas > preco_atual else "BAIXA"
         
-        # Calcular confiança
         dispersao = np.std([detalhes_previsoes[modelo][-1] for modelo in detalhes_previsoes.keys()])
         confianca = max(60, min(90, 85 - (dispersao / preco_atual * 100)))
         
-        # Gerar data/hora atual
         agora = datetime.now().strftime('%d/%m/%Y às %H:%M')
         
-        # Criar relatório
         relatorio = f"""
 ================================================================================
                           RELATÓRIO DE PREVISÃO DE AÇÕES
@@ -416,10 +361,8 @@ Mínima do Dia: R$ {dados_acao.get('minima', 0):.2f}
 
 ================================================================================
 3. ANÁLISE POR MODELO INDIVIDUAL
-================================================================================
-"""
+================================================================================"""
 
-        # Adicionar detalhes de cada modelo
         icones_modelos = {
             'LSTM': '🧠', 'RandomForest': '🌲', 
             'GradientBoosting': '🚀', 'LinearRegression': '📈'
@@ -443,7 +386,6 @@ Mínima do Dia: R$ {dados_acao.get('minima', 0):.2f}
    Previsão 2 semanas: R$ {pred_2sem:.2f} ({var_2sem:+.2f}%)
 """
 
-        # Adicionar análise e recomendações
         relatorio += f"""
 ================================================================================
 4. ANÁLISE TÉCNICA E INTERPRETAÇÃO
@@ -515,18 +457,14 @@ Data: {agora} | Modelos: RandomForest + GradientBoosting + LSTM + LinearRegressi
         return f"Erro ao gerar relatório: {str(e)}"
 
 def criar_modelo_lstm(input_shape):
-    """
-    Cria e compila o modelo LSTM adaptativo
-    """
-    # Ajustar neurônios baseado no tamanho da sequência
-    neurons = min(50, max(20, input_shape[0]))  # Entre 20-50 neurônios
+    neurons = min(50, max(20, input_shape[0]))
     
     model = Sequential([
         LSTM(neurons, return_sequences=True, input_shape=input_shape),
         Dropout(0.2),
-        LSTM(neurons // 2, return_sequences=False),  # Segunda camada menor
+        LSTM(neurons // 2, return_sequences=False),
         Dropout(0.2),
-        Dense(neurons // 4),  # Camada densa proporcional
+        Dense(neurons // 4),
         Dense(1)
     ])
     
@@ -534,29 +472,23 @@ def criar_modelo_lstm(input_shape):
     return model
 
 def treinar_modelo_lstm(X, y):
-    """
-    Treina o modelo LSTM com os dados fornecidos
-    """
     try:
-        # Dividir dados (80% treino, 20% validação)
         split_index = int(0.8 * len(X))
         X_train, X_val = X[:split_index], X[split_index:]
         y_train, y_val = y[:split_index], y[split_index:]
         
-        # Criar modelo
         model = criar_modelo_lstm((X.shape[1], X.shape[2]))
         
-        # Treinar modelo (épocas adaptativas)
-        epochs = min(50, max(20, len(X_train) // 2))  # Entre 20-50 épocas
+        epochs = min(50, max(20, len(X_train) // 2))
         
         with st.spinner(f'Treinando modelo de IA... ({epochs} épocas)'):
             history = model.fit(
                 X_train, y_train,
                 epochs=epochs,
-                batch_size=min(32, max(8, len(X_train) // 4)),  # Batch adaptativo
+                batch_size=min(32, max(8, len(X_train) // 4)),
                 validation_data=(X_val, y_val),
-                verbose=0,  # Silencioso
-                shuffle=False  # Manter ordem temporal
+                verbose=0,
+                shuffle=False
             )
         
         return model, history, None
@@ -565,11 +497,7 @@ def treinar_modelo_lstm(X, y):
         return None, None, f"Erro no treinamento: {str(e)}"
 
 def fazer_previsao(model, scaler, historico_df):
-    """
-    Faz previsão do próximo preço usando o modelo treinado
-    """
     try:
-        # Preparar dados mais recentes
         df = historico_df.copy()
         df['Close_MA7'] = df['Close'].rolling(window=7).mean()
         df['Close_MA21'] = df['Close'].rolling(window=21).mean()
@@ -578,32 +506,24 @@ def fazer_previsao(model, scaler, historico_df):
         
         df = df.dropna()
         
-        # Determinar tamanho da sequência baseado nos dados disponíveis
         dias_disponveis = len(df)
         sequence_length = min(30, int(dias_disponveis * 0.7))
         
-        # Pegar últimos dias conforme sequência calculada
         features = ['Close', 'Volume', 'Close_MA7', 'Close_MA21', 'Price_Change']
         last_days = df[features].tail(sequence_length).values
         
-        # Normalizar
         last_days_scaled = scaler.transform(last_days)
         
-        # Reshape para o modelo
         X_pred = np.array([last_days_scaled])
         
-        # Fazer previsão
         pred_scaled = model.predict(X_pred, verbose=0)
         
-        # Desnormalizar previsão
-        # Criar array com shape correto para inverse_transform
-        pred_array = np.zeros((1, 5))  # 5 features
-        pred_array[0, 0] = pred_scaled[0, 0]  # Colocar previsão na posição do Close
+        pred_array = np.zeros((1, 5))
+        pred_array[0, 0] = pred_scaled[0, 0]
         
         pred_original = scaler.inverse_transform(pred_array)
         preco_previsto = pred_original[0, 0]
         
-        # Data da previsão (próximo dia útil)
         ultima_data = df.index.max()
         data_previsao = ultima_data + timedelta(days=1)
         
@@ -613,11 +533,7 @@ def fazer_previsao(model, scaler, historico_df):
         return None, None, f"Erro na previsão: {str(e)}"
 
 def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
-    """
-    Treina ensemble de modelos: RandomForest, GradientBoosting, LinearRegression e LSTM
-    """
     try:
-        # Dividir dados (70% treino, 30% teste) - ajustado para poucos dados
         split_idx = max(1, int(0.7 * len(X_traditional)))
         
         X_trad_train, X_trad_test = X_traditional[:split_idx], X_traditional[split_idx:]
@@ -627,21 +543,18 @@ def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
         modelos = {}
         scores = {}
         
-        # 1. Random Forest (treina um modelo para cada dia) - simplificado
         rf_models = []
-        for dia in range(14):  # 14 dias
+        for dia in range(14):
             rf = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42, n_jobs=-1)
             rf.fit(X_trad_train, y_train[:, dia])
             rf_models.append(rf)
             
-            # Avaliar se há dados de teste
             if len(X_trad_test) > 0:
                 pred = rf.predict(X_trad_test)
                 scores[f'RF_dia_{dia+1}'] = mean_squared_error(y_test[:, dia], pred)
         
         modelos['RandomForest'] = rf_models
         
-        # 2. Gradient Boosting - simplificado
         gb_models = []
         for dia in range(14):
             gb = GradientBoostingRegressor(n_estimators=50, max_depth=6, random_state=42)
@@ -654,7 +567,6 @@ def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
         
         modelos['GradientBoosting'] = gb_models
         
-        # 3. Linear Regression
         lr_models = []
         for dia in range(14):
             lr = LinearRegression()
@@ -667,20 +579,16 @@ def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
         
         modelos['LinearRegression'] = lr_models
         
-        # 4. LSTM (multi-output) - com verificações de dados
         try:
-            # Verificar qualidade dos dados LSTM
             if len(X_lstm_train) < 5:
                 st.warning(f"⚠️ Dados LSTM insuficientes: {len(X_lstm_train)} amostras. Removendo LSTM do ensemble.")
                 modelos['LSTM'] = None
             else:
-                # Verificar se os dados estão normalizados corretamente
                 lstm_train_mean = np.mean(X_lstm_train)
                 lstm_train_std = np.std(X_lstm_train)
                 y_train_mean = np.mean(y_train)
                 y_train_std = np.std(y_train)
                 
-                # Se dados muito fora do padrão, remover LSTM
                 if lstm_train_std < 0.01 or y_train_std < 0.01:
                     st.warning("⚠️ Dados LSTM com baixa variabilidade. Removendo LSTM do ensemble.")
                     modelos['LSTM'] = None
@@ -689,12 +597,11 @@ def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
                         LSTM(32, return_sequences=False, input_shape=(X_lstm.shape[1], X_lstm.shape[2])),
                         Dropout(0.3),
                         Dense(16, activation='relu'),
-                        Dense(14)  # 14 outputs (14 dias)
+                        Dense(14)
                     ])
                     
                     lstm_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
                     
-                    # Ajustar épocas baseado na quantidade de dados
                     epochs = min(20, max(5, len(X_lstm_train)))
                     batch_size = max(1, min(4, len(X_lstm_train) // 3))
                     
@@ -715,17 +622,15 @@ def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
                                 verbose=0
                             )
                     
-                    # Verificar se o modelo aprendeu (loss deve diminuir)
                     final_loss = history.history['loss'][-1]
                     initial_loss = history.history['loss'][0]
                     
-                    if final_loss >= initial_loss * 0.95:  # Se não melhorou pelo menos 5%
+                    if final_loss >= initial_loss * 0.95:
                         st.warning("⚠️ LSTM não convergiu adequadamente. Removendo do ensemble.")
                         modelos['LSTM'] = None
                     else:
                         modelos['LSTM'] = lstm_model
                         
-                        # Avaliar LSTM se há dados de teste
                         if len(X_lstm_test) > 0:
                             lstm_pred = lstm_model.predict(X_lstm_test, verbose=0)
                             for dia in range(14):
@@ -741,16 +646,11 @@ def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
         return None, None, f"Erro no treinamento do ensemble: {str(e)}"
 
 def fazer_previsao_ensemble(modelos, scalers, historico_df):
-    """
-    Faz previsão usando ensemble de modelos para 14 dias
-    """
     try:
         scaler_traditional, scaler_lstm = scalers
         
-        # Preparar dados mais recentes
         df = historico_df.copy()
         
-        # Calcular features (mesmo processo do treinamento)
         df['Close_MA7'] = df['Close'].rolling(window=7).mean()
         df['Close_MA21'] = df['Close'].rolling(window=21).mean()
         df['Price_Change'] = df['Close'].pct_change()
@@ -765,7 +665,6 @@ def fazer_previsao_ensemble(modelos, scalers, historico_df):
         
         df = df.dropna()
         
-        # Features para modelos tradicionais
         feature_cols = ['Close_MA7', 'Close_MA21', 'Price_Change', 'Volume_MA7', 
                        'Volatility', 'RSI', 'MACD', 'BB_upper', 'BB_lower',
                        'Close_lag1', 'Close_lag2', 'Volume_Change']
@@ -773,62 +672,51 @@ def fazer_previsao_ensemble(modelos, scalers, historico_df):
         last_features = df[feature_cols].iloc[-1:].values
         last_features_scaled = scaler_traditional.transform(last_features)
         
-        # Features para LSTM - ajustado para dados limitados
         lstm_features = ['Close', 'Volume', 'Close_MA7', 'Close_MA21', 'Price_Change']
-        sequence_length = min(15, len(df) - 1)  # Ajustar baseado nos dados disponíveis
+        sequence_length = min(15, len(df) - 1)
         last_sequence = df[lstm_features].tail(sequence_length).values
         last_sequence_scaled = scaler_lstm.transform(last_sequence)
         last_sequence_scaled = last_sequence_scaled.reshape(1, sequence_length, -1)
         
-        # Fazer previsões com todos os modelos
         previsoes = {}
         
-        # Random Forest
         rf_pred = []
         for i, model in enumerate(modelos['RandomForest']):
             pred = model.predict(last_features_scaled)[0]
             rf_pred.append(pred)
         previsoes['RandomForest'] = np.array(rf_pred)
         
-        # Gradient Boosting
         gb_pred = []
         for i, model in enumerate(modelos['GradientBoosting']):
             pred = model.predict(last_features_scaled)[0]
             gb_pred.append(pred)
         previsoes['GradientBoosting'] = np.array(gb_pred)
         
-        # Linear Regression
         lr_pred = []
         for i, model in enumerate(modelos['LinearRegression']):
             pred = model.predict(last_features_scaled)[0]
             lr_pred.append(pred)
         previsoes['LinearRegression'] = np.array(lr_pred)
         
-        # LSTM (se disponível)
         if modelos['LSTM'] is not None:
             lstm_pred = modelos['LSTM'].predict(last_sequence_scaled, verbose=0)[0]
             previsoes['LSTM'] = lstm_pred
         
-        # Ensemble final (média ponderada baseada na performance)
-        # Ajustar pesos baseado nos modelos disponíveis
         if modelos['LSTM'] is not None:
             pesos = {'RandomForest': 0.3, 'GradientBoosting': 0.3, 'LSTM': 0.25, 'LinearRegression': 0.15}
         else:
-            # Redistribuir peso do LSTM para outros modelos
             pesos = {'RandomForest': 0.4, 'GradientBoosting': 0.4, 'LinearRegression': 0.2}
         
         previsao_final = np.zeros(14)
         for modelo, pred in previsoes.items():
             previsao_final += pred * pesos[modelo]
         
-        # Gerar datas para as previsões (próximos 14 dias úteis)
         datas_previsao = []
         data_atual = historico_df.index.max()
         dias_adicionados = 0
         
         while dias_adicionados < 14:
             data_atual += timedelta(days=1)
-            # Pular fins de semana (sábado=5, domingo=6)
             if data_atual.weekday() < 5:
                 datas_previsao.append(data_atual)
                 dias_adicionados += 1
@@ -839,25 +727,19 @@ def fazer_previsao_ensemble(modelos, scalers, historico_df):
         return None, None, None, f"Erro na previsão ensemble: {str(e)}"
 
 def gerar_previsao_acao(dados_acao):
-    """
-    Função principal que orquestra todo o processo de ML ensemble
-    """
     try:
         historico = dados_acao.get('historico')
         if historico is None or historico.empty:
             return None, None, None, "Dados históricos não disponíveis"
         
-        # 1. Preparar dados para ensemble
         X_trad, X_lstm, y_multi, scalers, erro_prep = preparar_dados_ensemble(historico)
         if erro_prep:
             return None, None, None, erro_prep
         
-        # 2. Treinar ensemble de modelos
         modelos, scores, erro_treino = treinar_ensemble_modelos(X_trad, X_lstm, y_multi)
         if erro_treino:
             return None, None, None, erro_treino
         
-        # 3. Fazer previsão ensemble
         previsoes, datas, detalhes, erro_pred = fazer_previsao_ensemble(modelos, scalers, historico)
         if erro_pred:
             return None, None, None, erro_pred
@@ -868,21 +750,17 @@ def gerar_previsao_acao(dados_acao):
         return None, None, None, f"Erro geral na previsão ensemble: {str(e)}"
 
 def buscar_dados_acao(ticker):
-    """Busca dados da ação via Brapi API"""
     try:
         ticker = ticker.upper().strip()
         
         with st.spinner(f'Buscando dados para {ticker}...'):
             
-            # API Key da Brapi
             API_KEY = "nUUZxG2ZdAWuSkBDhPobC2"
             
-            # Headers para autenticação
             headers = {
                 "Authorization": f"Bearer {API_KEY}"
             }
             
-            # 1. Buscar cotação atual
             url_cotacao = f"https://brapi.dev/api/quote/{ticker}"
             response = requests.get(url_cotacao, headers=headers, timeout=10)
             
@@ -896,7 +774,6 @@ def buscar_dados_acao(ticker):
             
             acao_data = data['results'][0]
             
-            # 2. Buscar histórico (3 meses)
             url_historico = f"https://brapi.dev/api/quote/{ticker}?range=3mo&interval=1d"
             response_hist = requests.get(url_historico, headers=headers, timeout=10)
             
@@ -910,7 +787,6 @@ def buscar_dados_acao(ticker):
                     hist_data = data_hist['results'][0].get('historicalDataPrice', [])
                     
                     if hist_data:
-                        # Converter para DataFrame
                         hist_list = []
                         for item in hist_data:
                             try:
@@ -931,9 +807,8 @@ def buscar_dados_acao(ticker):
                             historico.set_index('Data', inplace=True)
                             historico.sort_index(inplace=True)
                             
-                            # Calcular dados de 3 meses atrás (ou proporcionalmente)
-                            if len(historico) > 30:  # Se temos pelo menos 30 dias
-                                idx_proporcional = min(len(historico) - 1, len(historico) * 3 // 4)  # 75% do histórico
+                            if len(historico) > 30:
+                                idx_proporcional = min(len(historico) - 1, len(historico) * 3 // 4)
                                 dados_3m_atras = historico.iloc[-idx_proporcional]
                                 dados_3_meses = {
                                     'data': dados_3m_atras.name.strftime('%d/%m/%Y'),
@@ -941,30 +816,24 @@ def buscar_dados_acao(ticker):
                                     'volume': int(dados_3m_atras['Volume'])
                                 }
             
-            # 3. Calcular indicadores técnicos se temos histórico
             indicadores = {}
             if historico is not None and len(historico) > 0:
-                # Máxima e mínima dos últimos 52 semanas (ou período disponível)
                 indicadores['maxima_52s'] = round(historico['High'].max(), 2)
                 indicadores['minima_52s'] = round(historico['Low'].min(), 2)
                 
-                # Volume médio dos últimos 30 dias
                 volume_medio = historico['Volume'].tail(min(30, len(historico))).mean()
                 indicadores['volume_medio'] = int(volume_medio) if not pd.isna(volume_medio) else 0
                 
-                # Média móvel simples de 20 e 50 dias
                 if len(historico) >= 20:
                     indicadores['media_20d'] = round(historico['Close'].tail(20).mean(), 2)
                 if len(historico) >= 50:
                     indicadores['media_50d'] = round(historico['Close'].tail(50).mean(), 2)
                 
-                # Volatilidade (desvio padrão dos últimos 30 dias)
                 if len(historico) >= 30:
                     returns = historico['Close'].pct_change().tail(30)
-                    volatilidade = returns.std() * np.sqrt(252) * 100  # Anualizada
+                    volatilidade = returns.std() * np.sqrt(252) * 100
                     indicadores['volatilidade'] = round(volatilidade, 1)
             
-            # 4. Montar dados de retorno
             dados = {
                 'ticker': acao_data.get('symbol', ticker),
                 'nome': acao_data.get('shortName', acao_data.get('longName', 'N/A')),
@@ -994,11 +863,9 @@ def buscar_dados_acao(ticker):
         return None, f"Erro: {str(e)}"
 
 def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas_previsao=None, detalhes_previsoes=None):
-    """Cria gráfico com dados históricos e previsões ensemble de 2 semanas"""
     fig = go.Figure()
     
     if historico is not None and not historico.empty:
-        # Linha principal do preço histórico
         fig.add_trace(go.Scatter(
             x=historico.index,
             y=historico['Close'],
@@ -1008,7 +875,6 @@ def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas
             hovertemplate='<b>R$ %{y:.2f}</b><br>%{x}<extra></extra>'
         ))
         
-        # Área sombreada
         fig.add_trace(go.Scatter(
             x=historico.index,
             y=historico['Close'],
@@ -1018,9 +884,7 @@ def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas
             showlegend=False
         ))
         
-        # Adicionar previsões ensemble se disponível
         if previsoes_ensemble is not None and datas_previsao is not None:
-            # Previsão ensemble principal
             fig.add_trace(go.Scatter(
                 x=datas_previsao,
                 y=previsoes_ensemble,
@@ -1031,7 +895,6 @@ def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas
                 hovertemplate='<b>Ensemble</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
             ))
             
-            # Linha conectando último ponto real com primeira previsão
             ultimo_preco = historico['Close'].iloc[-1]
             ultima_data = historico.index[-1]
             
@@ -1045,7 +908,6 @@ def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas
                 showlegend=False
             ))
             
-            # Adicionar previsões individuais dos modelos (transparentes)
             if detalhes_previsoes is not None:
                 cores_modelos = {
                     'LSTM': '#ff9999',
@@ -1066,7 +928,6 @@ def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas
                             hovertemplate=f'<b>{modelo}</b><br><b>R$ %{{y:.2f}}</b><br>%{{x|%d/%m/%Y}}<extra></extra>'
                         ))
     
-    # Título dinâmico baseado na presença de previsões
     titulo = f'{ticker}'
     if previsoes_ensemble is not None:
         titulo += ' - Previsão Ensemble (2 Semanas)'
@@ -1102,7 +963,6 @@ def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas
     
     return fig
 
-# Inicializar session state
 if 'mostrar_dados' not in st.session_state:
     st.session_state.mostrar_dados = False
 if 'dados_acao' not in st.session_state:
@@ -1110,14 +970,11 @@ if 'dados_acao' not in st.session_state:
 if 'mostrar_previsao' not in st.session_state:
     st.session_state.mostrar_previsao = False
 if 'tela_atual' not in st.session_state:
-    st.session_state.tela_atual = 'login'  # Começar na tela de login
+    st.session_state.tela_atual = 'login'
 if 'usuario_logado' not in st.session_state:
     st.session_state.usuario_logado = None
 
-# ====================== TELAS DE AUTENTICAÇÃO ======================
-
 def render_login():
-    """Renderiza tela de login"""
     st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
     st.markdown("<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
     
@@ -1151,7 +1008,6 @@ def render_login():
     st.markdown("</div>", unsafe_allow_html=True)
 
 def render_cadastro():
-    """Renderiza tela de cadastro"""
     st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
     st.markdown("<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
     
@@ -1194,17 +1050,14 @@ def render_cadastro():
     st.markdown("</div>", unsafe_allow_html=True)
 
 def render_header_logado():
-    """Renderiza header para usuário logado"""
     usuario = get_usuario_logado()
     if usuario:
-        # Header simples e limpo
         col1, col2 = st.columns([4, 1])
         
         with col1:
             st.markdown(f"<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
         
         with col2:
-            # Dropdown do usuário
             st.markdown("<div style='padding-top: 30px; text-align: right;'>", unsafe_allow_html=True)
             user_action = st.selectbox(
                 "",
@@ -1215,37 +1068,28 @@ def render_header_logado():
             )
             st.markdown("</div>", unsafe_allow_html=True)
             
-            # Verificar se logout foi selecionado
             if user_action == "Logout":
                 fazer_logout()
                 st.session_state.tela_atual = 'login'
                 st.rerun()
 
-# ====================== CONTROLE DE TELAS ======================
-
-# Roteamento baseado na autenticação e tela atual
 if st.session_state.tela_atual == 'login':
     render_login()
 elif st.session_state.tela_atual == 'cadastro':
     render_cadastro()
 else:
-    # Verificar se usuário está logado
     if not get_usuario_logado():
         st.session_state.tela_atual = 'login'
         st.rerun()
     
-    # Renderizar header para usuário logado
     render_header_logado()
     
-    # ====================== TELA 1 - ENTRADA ======================
     if not st.session_state.mostrar_dados:
         
         st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
-        # Não mostrar o título aqui pois já está no header
     
         st.markdown("### Digite o código da ação que deseja analisar:")
         
-        # Formulário de entrada
         with st.form("busca_acao"):
             ticker = st.text_input(
                 "", 
@@ -1271,7 +1115,6 @@ else:
         elif submitted:
             st.error("Por favor, digite o código de uma ação")
     
-        # Verificar query parameters para ações nos favoritos
         query_params = st.query_params
         if "analyze" in query_params:
             ticker = query_params["analyze"]
@@ -1282,7 +1125,6 @@ else:
                 st.session_state.dados_acao = dados
                 st.session_state.mostrar_dados = True
                 st.session_state.mostrar_previsao = False
-                # Limpar query params
                 st.query_params.clear()
                 st.rerun()
         
@@ -1293,11 +1135,9 @@ else:
                 st.success(mensagem)
             else:
                 st.error(mensagem)
-            # Limpar query params
             st.query_params.clear()
             st.rerun()
         
-        # Verificar actions via session state (fallback)
         for key in list(st.session_state.keys()):
             if key.startswith('action_analyze_'):
                 ticker = key.replace('action_analyze_', '')
@@ -1322,17 +1162,14 @@ else:
                 st.rerun()
         
         
-        # Mostrar favoritos apenas se existirem (para não quebrar o layout)
         favoritos = carregar_favoritos()
         if favoritos:
-            st.markdown("---")  # Linha divisória sutil
+            st.markdown("---")
             st.markdown("### Favoritos")
             
-            # Grid de favoritos - 3 por linha para cards menores
-            for i in range(0, min(6, len(favoritos)), 3):  # Máximo 6 favoritos, 3 por linha
+            for i in range(0, min(6, len(favoritos)), 3):
                 cols = st.columns(3)
                 
-                # Processar favoritos da linha atual
                 for j, col in enumerate(cols):
                     fav_index = i + j
                     if fav_index < len(favoritos):
@@ -1340,9 +1177,7 @@ else:
                             fav = favoritos[fav_index]
                             dados_rapidos = buscar_dados_rapidos(fav['ticker'])
                             
-                            # Card usando container Streamlit
                             with st.container():
-                                # Botões pequenos no topo
                                 btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
                                 
                                 with btn_col1:
@@ -1369,9 +1204,7 @@ else:
                                         else:
                                             st.error(mensagem)
                                 
-                                # Métrica abaixo dos botões
                                 if dados_rapidos['sucesso']:
-                                    # Usar st.metric para exibir dados
                                     variacao_valor = dados_rapidos['variacao']
                                     delta_str = f"{variacao_valor:+.2f}%"
                                     
@@ -1381,34 +1214,26 @@ else:
                                         delta=delta_str
                                     )
                                 else:
-                                    # Métrica simples para dados indisponíveis
                                     st.metric(
                                         label=fav['ticker'],
                                         value="N/D"
                                     )
                             
         
-        # Se há mais de 6 favoritos, mostrar contador
         if len(favoritos) > 6:
             st.caption(f"+ {len(favoritos) - 6} outros favoritos")
     
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ====================== TELA 2 - DADOS ======================
     if st.session_state.mostrar_dados and not st.session_state.mostrar_previsao:
         dados = st.session_state.dados_acao
         
         st.markdown("<div class='tela-dados'>", unsafe_allow_html=True)
         
-        # Header com título
-        # st.markdown(f"<h1 class='main-header2'>📊 {dados['ticker']} - {dados['nome']}</h1>", unsafe_allow_html=True)
-        
-            # Linha do título e botões juntos
         col_titulo, col_btn_fav, col_btn_prev, col_btn = st.columns([2, 1, 1, 1])
         with col_titulo:
             st.markdown("<h4 class='section-title'>Cotação Atual</h4>", unsafe_allow_html=True)
         with col_btn_fav:
-            # Botão de favoritos
             is_fav = eh_favorito(dados['ticker'])
             btn_text = "★ Remover" if is_fav else "☆ Favoritar"
             btn_type = "secondary" if is_fav else "primary"
@@ -1435,7 +1260,6 @@ else:
                 st.session_state.dados_acao = None
                 st.rerun()
 
-        # Linha das métricas principais
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             variacao_valor = dados.get('variacao_valor', 0)
@@ -1448,7 +1272,6 @@ else:
         with col4:
             st.metric("Mínima do Dia", f"R$ {dados['minima']:.2f}")
 
-        # Segunda linha - Informações adicionais do dia
         st.markdown("<h4 class='section-title'>Informações do Pregão</h4>", unsafe_allow_html=True)
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1473,7 +1296,6 @@ else:
             else:
                 st.metric("Market Cap", "N/D")
 
-        # Terceira linha - Indicadores técnicos
         indicadores = dados.get('indicadores', {})
         if indicadores:
             st.markdown("<h4 class='section-title'>Indicadores Técnicos</h4>", unsafe_allow_html=True)
@@ -1508,7 +1330,6 @@ else:
                     st.metric("Volatilidade", "N/D")
 
         
-        # Linha 2: Dados Históricos (3 colunas + performance)
         if dados['dados_3_meses']:
             st.markdown("<h4 class='section-title'>Comparativo 3 Meses</h4 >", unsafe_allow_html=True)
             
@@ -1524,7 +1345,6 @@ else:
             with col3_hist:
                 st.metric("Data", d3m['data'])
             with col4_hist:
-                # Cálculo de performance
                 if dados['preco'] > 0 and d3m['preco'] > 0:
                     performance = ((dados['preco'] - d3m['preco']) / d3m['preco']) * 100
                     st.metric("Performance 3M", f"{performance:.2f}%")
@@ -1536,20 +1356,17 @@ else:
         else:
             st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
         
-        st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # ====================== TELA 3 - PREVISÃO ======================
     if st.session_state.mostrar_previsao:
         dados = st.session_state.dados_acao
         
         st.markdown("<div class='tela-dados'>", unsafe_allow_html=True)
         
-        # Header com título
         col_titulo, col_btn_fav, col_btn_volta, col_btn = st.columns([2, 1, 1, 1])
         with col_titulo:
             st.markdown("<h4 class='section-title'>Previsão de Preços com IA</h4>", unsafe_allow_html=True)
         with col_btn_fav:
-            # Botão de favoritos
             is_fav = eh_favorito(dados['ticker'])
             btn_text = "★ Remover" if is_fav else "☆ Favoritar"
             btn_type = "secondary" if is_fav else "primary"
@@ -1574,7 +1391,6 @@ else:
                 st.session_state.mostrar_dados = False
                 st.session_state.mostrar_previsao = False
                 st.session_state.dados_acao = None
-                # Limpar previsões armazenadas
                 if 'previsoes_ensemble' in st.session_state:
                     del st.session_state.previsoes_ensemble
                 if 'datas_previsao' in st.session_state:
@@ -1585,24 +1401,20 @@ else:
                     del st.session_state.ticker_previsao
                 st.rerun()
 
-        # Verificar se as previsões já foram calculadas
         if ('previsoes_ensemble' not in st.session_state or 
             'datas_previsao' not in st.session_state or 
             'detalhes_previsoes' not in st.session_state or
             st.session_state.get('ticker_previsao') != dados['ticker']):
             
-            # Gerar previsão usando Ensemble apenas se necessário
             with st.spinner('Gerando previsões com Ensemble de Modelos de IA...'):
                 previsoes_ensemble, datas_previsao, detalhes_previsoes, erro_ml = gerar_previsao_acao(dados)
             
-            # Armazenar resultados no session_state
             st.session_state.previsoes_ensemble = previsoes_ensemble
             st.session_state.datas_previsao = datas_previsao
             st.session_state.detalhes_previsoes = detalhes_previsoes
             st.session_state.erro_ml = erro_ml
             st.session_state.ticker_previsao = dados['ticker']
         else:
-            # Usar previsões já calculadas
             previsoes_ensemble = st.session_state.previsoes_ensemble
             datas_previsao = st.session_state.datas_previsao
             detalhes_previsoes = st.session_state.detalhes_previsoes
@@ -1613,15 +1425,13 @@ else:
             st.info("**Dica:** A previsão ensemble requer pelo menos 25 dias de histórico.")
             previsoes_ensemble, datas_previsao, detalhes_previsoes = None, None, None
         else:
-            # Calcular métricas das previsões
             preco_atual = dados['preco']
-            preco_1_semana = previsoes_ensemble[4]  # Dia 5 (1 semana)
-            preco_2_semanas = previsoes_ensemble[13]  # Dia 14 (2 semanas)
+            preco_1_semana = previsoes_ensemble[4]
+            preco_2_semanas = previsoes_ensemble[13]
             
             variacao_1_semana = ((preco_1_semana - preco_atual) / preco_atual) * 100
             variacao_2_semanas = ((preco_2_semanas - preco_atual) / preco_atual) * 100
             
-            # Exibir resultado da previsão
             st.success("**Previsões Ensemble geradas com sucesso!**")
             
             col_prev1, col_prev2, col_prev3, col_prev4 = st.columns(4)
@@ -1630,36 +1440,28 @@ else:
             with col_prev2:
                 st.metric("2 Semanas", f"R$ {preco_2_semanas:.2f}", f"{variacao_2_semanas:+.2f}%")
             with col_prev3:
-                # Calcular tendência geral
                 tendencia = "Alta" if preco_2_semanas > preco_atual else "Baixa"
                 st.metric("Tendência", tendencia)
             with col_prev4:
-                # Confiança baseada na dispersão entre modelos
                 dispersao = np.std([detalhes_previsoes[modelo][-1] for modelo in detalhes_previsoes.keys()])
                 confianca = max(60, min(90, 85 - (dispersao / preco_atual * 100)))
                 st.metric("Confiança", f"{confianca:.0f}%")
             
-            # Exibir detalhes dos modelos
             with st.expander("📊 Detalhes por Modelo"):
                 st.markdown("**Previsões para 2 semanas (último dia):**")
                 
-                # Determinar quantos modelos estão disponíveis
                 modelos_disponiveis = list(detalhes_previsoes.keys())
                 num_modelos = len(modelos_disponiveis)
                 
                 if num_modelos == 4:
-                    # Todos os modelos disponíveis
                     model_col1, model_col2, model_col3, model_col4 = st.columns(4)
                     cols = [model_col1, model_col2, model_col3, model_col4]
                 elif num_modelos == 3:
-                    # LSTM removido, usar 3 colunas
                     model_col1, model_col2, model_col3 = st.columns(3)
                     cols = [model_col1, model_col2, model_col3]
                 else:
-                    # Fallback para número variável
                     cols = st.columns(num_modelos)
                 
-                # Mapear ícones dos modelos
                 icones_modelos = {
                     'LSTM': '🧠',
                     'RandomForest': '🌲', 
@@ -1674,7 +1476,6 @@ else:
                     'LinearRegression': 'Linear Reg.'
                 }
                 
-                # Exibir métricas para cada modelo disponível
                 for i, modelo in enumerate(modelos_disponiveis):
                     with cols[i]:
                         pred = detalhes_previsoes[modelo][-1]
@@ -1683,7 +1484,6 @@ else:
                         nome = nomes_modelos.get(modelo, modelo)
                         st.metric(f"{icone} {nome}", f"R$ {pred:.2f}", f"{var:+.2f}%")
 
-        # Linha das métricas atuais
         st.markdown("<h4 class='section-title'>Dados Atuais</h4>", unsafe_allow_html=True)
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1695,7 +1495,6 @@ else:
         with col4:
             st.metric("Mínima", f"R$ {dados['minima']:.2f}")
 
-        # Gráfico com previsões ensemble
         if dados['historico'] is not None:
             fig_previsao = criar_grafico_com_previsao(
                 dados['historico'], 
@@ -1708,7 +1507,6 @@ else:
         else:
             st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
         
-        # Informações sobre o ensemble
         if not erro_ml:
             with st.expander("ℹ️ Sobre o Ensemble de Modelos"):
                 st.markdown("""
@@ -1742,7 +1540,6 @@ else:
                 - Sempre consulte um profissional qualificado antes de investir
                 """)
             
-            # Botão para gerar relatório PDF no final da página
             st.markdown("---")
             col_relatorio1, col_relatorio2, col_relatorio3 = st.columns([1, 2, 1])
             
@@ -1751,11 +1548,9 @@ else:
                     with st.spinner("Gerando relatório..."):
                         relatorio_texto = gerar_relatorio_previsao(dados, previsoes_ensemble, datas_previsao, detalhes_previsoes)
                         
-                        # Criar nome do arquivo
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         nome_arquivo = f"Relatorio_{dados['ticker']}_{timestamp}.txt"
                         
-                        # Botão de download
                         st.download_button(
                             label="💾 Download Relatório",
                             data=relatorio_texto,
@@ -1764,9 +1559,7 @@ else:
                             use_container_width=True
                         )
                         
-                        # Mostrar prévia do relatório
                         with st.expander("👁️ Prévia do Relatório"):
                             st.text(relatorio_texto[:1000] + "..." if len(relatorio_texto) > 1000 else relatorio_texto)
         
-        st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
-
+        st.markdown("</div>", unsafe_allow_html=True)
