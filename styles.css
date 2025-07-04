@@ -279,27 +279,41 @@ div.block-container {
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-/* Cards de favoritos com botões internos */
-.favorite-card-with-internal-buttons {
-    border: 1px solid #333;
-    border-radius: 12px;
-    margin: 8px 0 16px 0;
-    background: rgba(21, 37, 36, 0.7);
-    transition: all 0.2s ease;
-    font-family: 'Poppins', sans-serif;
+/* Botões pequenos dos favoritos */
+button[data-testid*="analyze_btn_"],
+button[data-testid*="remove_btn_"] {
+    height: 24px !important;
+    min-height: 24px !important;
+    width: 24px !important;
+    min-width: 24px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 50% !important;
+    font-size: 12px !important;
+    line-height: 1 !important;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
-.favorite-card-with-internal-buttons:hover {
-    border-color: #00d4ff;
-    background: rgba(21, 37, 36, 0.9);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
+/* Botão analisar */
+button[data-testid*="analyze_btn_"] {
+    color: #00d4ff !important;
 }
 
-/* Hover effects para botões dentro do card */
-.favorite-card-with-internal-buttons button:hover {
-    transform: scale(1.05);
-    transition: transform 0.2s ease;
+button[data-testid*="analyze_btn_"]:hover {
+    background: rgba(0, 212, 255, 0.1) !important;
+    transform: scale(1.1) !important;
+}
+
+/* Botão remover */
+button[data-testid*="remove_btn_"] {
+    color: #ff4444 !important;
+}
+
+button[data-testid*="remove_btn_"]:hover {
+    background: rgba(255, 68, 68, 0.1) !important;
+    transform: scale(1.1) !important;
 }
 
 /* Esconder botões Streamlit dos favoritos mantendo-os clicáveis */
@@ -340,6 +354,34 @@ button[data-testid*="hidden"] {
     top: -10000px !important;
 }
 
+/* Esconder botões com emojis específicos em favoritos */
+.tela-entrada button:contains("🔍"),
+.tela-entrada button:contains("🗑"),
+.screen-entrada button:contains("🔍"),
+.screen-entrada button:contains("🗑") {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Esconder divs de colunas que contenham botões ocultos */
+.stColumns > div:has(button[data-testid*="hidden_"]) {
+    display: none !important;
+}
+
+/* Esconder elementos que contenham botões ocultos */
+div:has(button[data-testid*="hidden_analyze_"]),
+div:has(button[data-testid*="hidden_remove_"]) {
+    display: none !important;
+}
+
+/* Esconder containers com botões ocultos */
+.stContainer:has(button[data-testid*="hidden_"]) {
+    display: none !important;
+    visibility: hidden !important;
+    position: absolute !important;
+    left: -9999px !important;
+}
+
 /* Espaçamento para botões dos favoritos */
 .stButton > button {
     margin-top: 0.5rem !important;
@@ -355,19 +397,14 @@ button[data-testid*="hidden"] {
     margin-bottom: 1rem;
 }
 
-/* Botão logout posicionado no canto superior direito */
-button[data-testid="baseButton-secondary"] {
-    position: fixed !important;
-    top: 25px !important;
-    right: 24px !important;
+/* Botão logout normal */
+button[data-testid*="logout_btn"] {
     font-size: 0.8rem !important;
     padding: 0.4rem 0.8rem !important;
     min-height: 32px !important;
     height: 32px !important;
     border-radius: 6px !important;
     font-weight: 500 !important;
-    z-index: 1000 !important;
-    width: auto !important;
-    min-width: 70px !important;
+    margin-top: 0.5rem !important;
 }
 

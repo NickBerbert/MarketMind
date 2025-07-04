@@ -1,11 +1,5 @@
 [
   {
-    "ticker": "PETR4",
-    "nome": "PETROBRAS   PN      N2",
-    "preco": 32.26,
-    "data_adicao": "03/07/2025 15:15"
-  },
-  {
     "ticker": "VALE3",
     "nome": "VALE        ON      NM",
     "preco": 54.92,
@@ -16,5 +10,11 @@
     "nome": "ITAUUNIBANCOPN      N1",
     "preco": 37.71,
     "data_adicao": "03/07/2025 15:44"
+  },
+  {
+    "ticker": "PETR4",
+    "nome": "PETROBRAS   PN      N2",
+    "preco": 32.18,
+    "data_adicao": "04/07/2025 14:47"
   }
 ]

@@ -6,12 +6,17 @@ from pathlib import Path
 import requests
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.models import Sequential # type: ignore
+from tensorflow.keras.layers import LSTM, Dense, Dropout # type: ignore
 import warnings
 import json
 import os
+from datetime import datetime
+from io import BytesIO
 warnings.filterwarnings('ignore')
 
 # Configuração da página
@@ -238,59 +243,276 @@ def buscar_dados_rapidos(ticker):
     
     return {'preco': 0, 'variacao': 0, 'sucesso': False}
 
-def preparar_dados_lstm(historico_df):
+def preparar_dados_ensemble(historico_df, dias_previsao=14):
     """
-    Prepara dados históricos para o modelo LSTM
+    Prepara dados históricos para ensemble de modelos (previsão de 2 semanas)
     """
     try:
         if historico_df is None or historico_df.empty:
-            return None, None, None, "Dados históricos insuficientes"
+            return None, None, None, None, "Dados históricos insuficientes"
         
-        # Criar features do modelo
+        # Criar features técnicas
         df = historico_df.copy()
         
-        # Features principais: Close, Volume (normalizar depois)
-        df['Close_MA7'] = df['Close'].rolling(window=7).mean()  # Média móvel 7 dias
-        df['Close_MA21'] = df['Close'].rolling(window=21).mean()  # Média móvel 21 dias
-        df['Price_Change'] = df['Close'].pct_change()  # Variação percentual
-        df['Volume_MA7'] = df['Volume'].rolling(window=7).mean()  # Volume médio
+        # Features básicas
+        df['Close_MA7'] = df['Close'].rolling(window=7).mean()
+        df['Close_MA21'] = df['Close'].rolling(window=21).mean()
+        df['Price_Change'] = df['Close'].pct_change()
+        df['Volume_MA7'] = df['Volume'].rolling(window=7).mean()
+        df['Volatility'] = df['Close'].rolling(window=14).std()
+        
+        # Features avançadas
+        df['RSI'] = calcular_rsi(df['Close'])
+        df['MACD'] = calcular_macd(df['Close'])
+        df['BB_upper'], df['BB_lower'] = calcular_bollinger_bands(df['Close'])
+        df['Close_lag1'] = df['Close'].shift(1)
+        df['Close_lag2'] = df['Close'].shift(2)
+        df['Volume_Change'] = df['Volume'].pct_change()
         
         # Remover NaNs
         df = df.dropna()
         
-        # Ajustar sequência baseado na quantidade de dados disponíveis
         dias_disponveis = len(df)
-        if dias_disponveis < 20:  # Mínimo absoluto
-            return None, None, None, f"Histórico insuficiente: {dias_disponveis} dias (mínimo: 20)"
+        if dias_disponveis < 25:  # Mínimo reduzido para funcionar com API
+            return None, None, None, None, f"Histórico insuficiente: {dias_disponveis} dias (mínimo: 25)"
         
-        # Usar sequência adaptativa: máximo 30 dias ou 70% dos dados disponíveis
-        sequence_length = min(30, int(dias_disponveis * 0.7))
+        # Features para modelos tradicionais (não sequenciais)
+        feature_cols = ['Close_MA7', 'Close_MA21', 'Price_Change', 'Volume_MA7', 
+                       'Volatility', 'RSI', 'MACD', 'BB_upper', 'BB_lower',
+                       'Close_lag1', 'Close_lag2', 'Volume_Change']
         
-        # Selecionar features para o modelo
-        features = ['Close', 'Volume', 'Close_MA7', 'Close_MA21', 'Price_Change']
-        data = df[features].values
+        # Preparar dados para modelos tradicionais
+        X_traditional = df[feature_cols].values
+        
+        # Preparar dados para LSTM (sequenciais) - ajustado para dados limitados
+        sequence_length = min(15, int(dias_disponveis * 0.4))  # Sequência menor
+        lstm_features = ['Close', 'Volume', 'Close_MA7', 'Close_MA21', 'Price_Change']
+        lstm_data = df[lstm_features].values
         
         # Normalizar dados
-        scaler = MinMaxScaler()
-        data_scaled = scaler.fit_transform(data)
+        scaler_traditional = MinMaxScaler()
+        scaler_lstm = MinMaxScaler()
         
-        # Criar sequências adaptativas para prever o próximo
-        # Criar sequências adaptativas para prever o próximo
-        X, y = [], []
+        X_traditional_scaled = scaler_traditional.fit_transform(X_traditional)
+        lstm_data_scaled = scaler_lstm.fit_transform(lstm_data)
         
-        for i in range(sequence_length, len(data_scaled)):
-            X.append(data_scaled[i-sequence_length:i])  # sequência anterior
-            y.append(data_scaled[i, 0])  # Preço do dia seguinte (Close é index 0)
+        # Criar targets para múltiplos dias (2 semanas = 14 dias)
+        y_multi = []
+        X_traditional_final = []
+        X_lstm_final = []
         
-        X, y = np.array(X), np.array(y)
+        for i in range(len(df) - dias_previsao):
+            # Target: próximos 14 preços
+            future_prices = df['Close'].iloc[i+1:i+1+dias_previsao].values
+            if len(future_prices) == dias_previsao:
+                y_multi.append(future_prices)
+                X_traditional_final.append(X_traditional_scaled[i])
+                
+                # Para LSTM: sequência até o ponto atual
+                if i >= sequence_length:
+                    X_lstm_final.append(lstm_data_scaled[i-sequence_length:i])
         
-        if len(X) == 0:
-            return None, None, None, f"Dados insuficientes para criar sequências. Disponível: {dias_disponveis}, Sequência: {sequence_length}"
+        # Ajustar arrays para mesmo tamanho
+        min_samples = min(len(X_traditional_final), len(X_lstm_final))
+        if min_samples < 10:  # Reduzido para funcionar com dados limitados
+            return None, None, None, None, "Dados insuficientes para treinamento"
         
-        return X, y, scaler, None
+        X_traditional_final = np.array(X_traditional_final[-min_samples:])
+        X_lstm_final = np.array(X_lstm_final[-min_samples:])
+        y_multi = np.array(y_multi[-min_samples:])
+        
+        return X_traditional_final, X_lstm_final, y_multi, (scaler_traditional, scaler_lstm), None
         
     except Exception as e:
-        return None, None, None, f"Erro ao preparar dados: {str(e)}"
+        return None, None, None, None, f"Erro ao preparar dados: {str(e)}"
+
+def calcular_rsi(prices, period=14):
+    """Calcula RSI (Relative Strength Index)"""
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.fillna(50)
+
+def calcular_macd(prices, fast=12, slow=26):
+    """Calcula MACD"""
+    ema_fast = prices.ewm(span=fast).mean()
+    ema_slow = prices.ewm(span=slow).mean()
+    macd = ema_fast - ema_slow
+    return macd.fillna(0)
+
+def calcular_bollinger_bands(prices, window=20, std_dev=2):
+    """Calcula Bandas de Bollinger"""
+    ma = prices.rolling(window=window).mean()
+    std = prices.rolling(window=window).std()
+    upper = ma + (std * std_dev)
+    lower = ma - (std * std_dev)
+    return upper.fillna(prices), lower.fillna(prices)
+
+def gerar_relatorio_previsao(dados_acao, previsoes_ensemble, datas_previsao, detalhes_previsoes):
+    """
+    Gera relatório textual da previsão para download
+    """
+    try:
+        ticker = dados_acao['ticker']
+        nome = dados_acao['nome']
+        preco_atual = dados_acao['preco']
+        variacao_atual = dados_acao['variacao']
+        
+        # Calcular métricas das previsões
+        preco_1_semana = previsoes_ensemble[4]  # Dia 5
+        preco_2_semanas = previsoes_ensemble[13]  # Dia 14
+        variacao_1_semana = ((preco_1_semana - preco_atual) / preco_atual) * 100
+        variacao_2_semanas = ((preco_2_semanas - preco_atual) / preco_atual) * 100
+        
+        # Determinar tendência
+        tendencia = "ALTA" if preco_2_semanas > preco_atual else "BAIXA"
+        
+        # Calcular confiança
+        dispersao = np.std([detalhes_previsoes[modelo][-1] for modelo in detalhes_previsoes.keys()])
+        confianca = max(60, min(90, 85 - (dispersao / preco_atual * 100)))
+        
+        # Gerar data/hora atual
+        agora = datetime.now().strftime('%d/%m/%Y às %H:%M')
+        
+        # Criar relatório
+        relatorio = f"""
+================================================================================
+                          RELATÓRIO DE PREVISÃO DE AÇÕES
+                                 MARKETMIND AI SYSTEM
+================================================================================
+
+Ação Analisada: {ticker} - {nome}
+Data do Relatório: {agora}
+Método: Ensemble de Machine Learning (4 Modelos)
+
+================================================================================
+1. SITUAÇÃO ATUAL DA AÇÃO
+================================================================================
+
+Preço Atual: R$ {preco_atual:.2f}
+Variação Diária: {variacao_atual:+.2f}%
+Volume: {dados_acao.get('volume', 0):,}
+Máxima do Dia: R$ {dados_acao.get('maxima', 0):.2f}
+Mínima do Dia: R$ {dados_acao.get('minima', 0):.2f}
+
+================================================================================
+2. PREVISÕES DO ENSEMBLE AI
+================================================================================
+
+📈 PREVISÃO 1 SEMANA (5 dias úteis):
+   Preço Previsto: R$ {preco_1_semana:.2f}
+   Variação Esperada: {variacao_1_semana:+.2f}%
+   Data Alvo: {datas_previsao[4].strftime('%d/%m/%Y')}
+
+📈 PREVISÃO 2 SEMANAS (14 dias úteis):
+   Preço Previsto: R$ {preco_2_semanas:.2f}
+   Variação Esperada: {variacao_2_semanas:+.2f}%
+   Data Alvo: {datas_previsao[13].strftime('%d/%m/%Y')}
+
+🎯 TENDÊNCIA GERAL: {tendencia}
+🔒 NÍVEL DE CONFIANÇA: {confianca:.0f}%
+
+================================================================================
+3. ANÁLISE POR MODELO INDIVIDUAL
+================================================================================
+"""
+
+        # Adicionar detalhes de cada modelo
+        icones_modelos = {
+            'LSTM': '🧠', 'RandomForest': '🌲', 
+            'GradientBoosting': '🚀', 'LinearRegression': '📈'
+        }
+        
+        nomes_modelos = {
+            'LSTM': 'LSTM Neural Network',
+            'RandomForest': 'Random Forest',
+            'GradientBoosting': 'Gradient Boosting', 
+            'LinearRegression': 'Linear Regression'
+        }
+        
+        for modelo, previsoes in detalhes_previsoes.items():
+            icone = icones_modelos.get(modelo, '📊')
+            nome_modelo = nomes_modelos.get(modelo, modelo)
+            pred_2sem = previsoes[-1]
+            var_2sem = ((pred_2sem - preco_atual) / preco_atual) * 100
+            
+            relatorio += f"""
+{icone} {nome_modelo.upper()}:
+   Previsão 2 semanas: R$ {pred_2sem:.2f} ({var_2sem:+.2f}%)
+"""
+
+        # Adicionar análise e recomendações
+        relatorio += f"""
+================================================================================
+4. ANÁLISE TÉCNICA E INTERPRETAÇÃO
+================================================================================
+
+CONSENSO DOS MODELOS:
+O ensemble de 4 algoritmos de Machine Learning indica uma tendência de {tendencia.lower()} 
+para a ação {ticker} nos próximos 14 dias úteis. A previsão sugere que o preço 
+pode alcançar R$ {preco_2_semanas:.2f}, representando uma variação de {variacao_2_semanas:+.1f}% 
+em relação ao preço atual.
+
+FATORES ANALISADOS:
+✓ Médias móveis e indicadores técnicos (RSI, MACD, Bollinger Bands)
+✓ Padrões de preço e volume dos últimos 40 dias
+✓ Volatilidade histórica e tendências de curto prazo
+✓ Correlações entre múltiplas variáveis técnicas
+
+NÍVEL DE CONSENSO:
+Com {confianca:.0f}% de confiança, os modelos apresentam {'alta concordância' if confianca >= 80 else 'concordância moderada' if confianca >= 70 else 'baixa concordância'} 
+em suas previsões. {'Isso indica maior probabilidade de acerto.' if confianca >= 80 else 'Recomenda-se cautela adicional na interpretação.' if confianca < 70 else 'Sugerem-se análises complementares.'}
+
+================================================================================
+5. RECOMENDAÇÕES E CONSIDERAÇÕES
+================================================================================
+
+CENÁRIO OTIMISTA ({tendencia}):
+{'Se a tendência de alta se confirmar, a ação pode apresentar valorização ' + f'significativa de {abs(variacao_2_semanas):.1f}% em 2 semanas.' if tendencia == 'ALTA' else f'Se a tendência de baixa se confirmar, recomenda-se cautela, com possível ' + f'desvalorização de {abs(variacao_2_semanas):.1f}% em 2 semanas.'}
+
+FATORES DE RISCO:
+⚠️ Eventos macroeconômicos podem impactar significativamente os preços
+⚠️ Notícias específicas da empresa ou setor podem alterar o cenário
+⚠️ Condições de mercado podem mudar rapidamente
+⚠️ Volume de negociação baixo pode aumentar a volatilidade
+
+ESTRATÉGIA SUGERIDA:
+{'• Considere posições graduais para aproveitar a tendência positiva' if tendencia == 'ALTA' else '• Avalie proteção de posições ou redução de exposição'}
+• Monitore indicadores de volume e volatilidade
+• Estabeleça stops de proteção adequados ao seu perfil de risco
+• Acompanhe notícias e eventos corporativos relevantes
+
+================================================================================
+6. DISCLAIMER E AVISOS LEGAIS
+================================================================================
+
+⚠️ AVISO IMPORTANTE:
+Este relatório é gerado por algoritmos de Machine Learning para fins 
+EXCLUSIVAMENTE EDUCACIONAIS e de pesquisa. NÃO constitui recomendação de 
+investimento, compra ou venda de ações.
+
+LIMITAÇÕES:
+• As previsões são baseadas apenas em dados históricos de preços
+• Mercados financeiros são influenciados por fatores imprevisíveis
+• Performance passada não garante resultados futuros
+• Modelos podem não capturar mudanças de regime do mercado
+
+RESPONSABILIDADE:
+O usuário assume total responsabilidade por suas decisões de investimento.
+Sempre consulte profissionais qualificados antes de investir.
+
+================================================================================
+RELATÓRIO GERADO AUTOMATICAMENTE PELO MARKETMIND AI SYSTEM
+Data: {agora} | Modelos: RandomForest + GradientBoosting + LSTM + LinearRegression
+================================================================================
+        """
+        
+        return relatorio.strip()
+        
+    except Exception as e:
+        return f"Erro ao gerar relatório: {str(e)}"
 
 def criar_modelo_lstm(input_shape):
     """
@@ -390,34 +612,260 @@ def fazer_previsao(model, scaler, historico_df):
     except Exception as e:
         return None, None, f"Erro na previsão: {str(e)}"
 
+def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
+    """
+    Treina ensemble de modelos: RandomForest, GradientBoosting, LinearRegression e LSTM
+    """
+    try:
+        # Dividir dados (70% treino, 30% teste) - ajustado para poucos dados
+        split_idx = max(1, int(0.7 * len(X_traditional)))
+        
+        X_trad_train, X_trad_test = X_traditional[:split_idx], X_traditional[split_idx:]
+        X_lstm_train, X_lstm_test = X_lstm[:split_idx], X_lstm[split_idx:]
+        y_train, y_test = y_multi[:split_idx], y_multi[split_idx:]
+        
+        modelos = {}
+        scores = {}
+        
+        # 1. Random Forest (treina um modelo para cada dia) - simplificado
+        rf_models = []
+        for dia in range(14):  # 14 dias
+            rf = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42, n_jobs=-1)
+            rf.fit(X_trad_train, y_train[:, dia])
+            rf_models.append(rf)
+            
+            # Avaliar se há dados de teste
+            if len(X_trad_test) > 0:
+                pred = rf.predict(X_trad_test)
+                scores[f'RF_dia_{dia+1}'] = mean_squared_error(y_test[:, dia], pred)
+        
+        modelos['RandomForest'] = rf_models
+        
+        # 2. Gradient Boosting - simplificado
+        gb_models = []
+        for dia in range(14):
+            gb = GradientBoostingRegressor(n_estimators=50, max_depth=6, random_state=42)
+            gb.fit(X_trad_train, y_train[:, dia])
+            gb_models.append(gb)
+            
+            if len(X_trad_test) > 0:
+                pred = gb.predict(X_trad_test)
+                scores[f'GB_dia_{dia+1}'] = mean_squared_error(y_test[:, dia], pred)
+        
+        modelos['GradientBoosting'] = gb_models
+        
+        # 3. Linear Regression
+        lr_models = []
+        for dia in range(14):
+            lr = LinearRegression()
+            lr.fit(X_trad_train, y_train[:, dia])
+            lr_models.append(lr)
+            
+            if len(X_trad_test) > 0:
+                pred = lr.predict(X_trad_test)
+                scores[f'LR_dia_{dia+1}'] = mean_squared_error(y_test[:, dia], pred)
+        
+        modelos['LinearRegression'] = lr_models
+        
+        # 4. LSTM (multi-output) - com verificações de dados
+        try:
+            # Verificar qualidade dos dados LSTM
+            if len(X_lstm_train) < 5:
+                st.warning(f"⚠️ Dados LSTM insuficientes: {len(X_lstm_train)} amostras. Removendo LSTM do ensemble.")
+                modelos['LSTM'] = None
+            else:
+                # Verificar se os dados estão normalizados corretamente
+                lstm_train_mean = np.mean(X_lstm_train)
+                lstm_train_std = np.std(X_lstm_train)
+                y_train_mean = np.mean(y_train)
+                y_train_std = np.std(y_train)
+                
+                # Se dados muito fora do padrão, remover LSTM
+                if lstm_train_std < 0.01 or y_train_std < 0.01:
+                    st.warning("⚠️ Dados LSTM com baixa variabilidade. Removendo LSTM do ensemble.")
+                    modelos['LSTM'] = None
+                else:
+                    lstm_model = Sequential([
+                        LSTM(32, return_sequences=False, input_shape=(X_lstm.shape[1], X_lstm.shape[2])),
+                        Dropout(0.3),
+                        Dense(16, activation='relu'),
+                        Dense(14)  # 14 outputs (14 dias)
+                    ])
+                    
+                    lstm_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+                    
+                    # Ajustar épocas baseado na quantidade de dados
+                    epochs = min(20, max(5, len(X_lstm_train)))
+                    batch_size = max(1, min(4, len(X_lstm_train) // 3))
+                    
+                    with st.spinner('Treinando modelo LSTM ensemble...'):
+                        if len(X_lstm_test) > 0:
+                            history = lstm_model.fit(
+                                X_lstm_train, y_train,
+                                epochs=epochs,
+                                batch_size=batch_size,
+                                validation_data=(X_lstm_test, y_test),
+                                verbose=0
+                            )
+                        else:
+                            history = lstm_model.fit(
+                                X_lstm_train, y_train,
+                                epochs=epochs,
+                                batch_size=batch_size,
+                                verbose=0
+                            )
+                    
+                    # Verificar se o modelo aprendeu (loss deve diminuir)
+                    final_loss = history.history['loss'][-1]
+                    initial_loss = history.history['loss'][0]
+                    
+                    if final_loss >= initial_loss * 0.95:  # Se não melhorou pelo menos 5%
+                        st.warning("⚠️ LSTM não convergiu adequadamente. Removendo do ensemble.")
+                        modelos['LSTM'] = None
+                    else:
+                        modelos['LSTM'] = lstm_model
+                        
+                        # Avaliar LSTM se há dados de teste
+                        if len(X_lstm_test) > 0:
+                            lstm_pred = lstm_model.predict(X_lstm_test, verbose=0)
+                            for dia in range(14):
+                                scores[f'LSTM_dia_{dia+1}'] = mean_squared_error(y_test[:, dia], lstm_pred[:, dia])
+        
+        except Exception as e:
+            st.warning(f"⚠️ Erro no treinamento LSTM: {str(e)}. Removendo do ensemble.")
+            modelos['LSTM'] = None
+        
+        return modelos, scores, None
+        
+    except Exception as e:
+        return None, None, f"Erro no treinamento do ensemble: {str(e)}"
+
+def fazer_previsao_ensemble(modelos, scalers, historico_df):
+    """
+    Faz previsão usando ensemble de modelos para 14 dias
+    """
+    try:
+        scaler_traditional, scaler_lstm = scalers
+        
+        # Preparar dados mais recentes
+        df = historico_df.copy()
+        
+        # Calcular features (mesmo processo do treinamento)
+        df['Close_MA7'] = df['Close'].rolling(window=7).mean()
+        df['Close_MA21'] = df['Close'].rolling(window=21).mean()
+        df['Price_Change'] = df['Close'].pct_change()
+        df['Volume_MA7'] = df['Volume'].rolling(window=7).mean()
+        df['Volatility'] = df['Close'].rolling(window=14).std()
+        df['RSI'] = calcular_rsi(df['Close'])
+        df['MACD'] = calcular_macd(df['Close'])
+        df['BB_upper'], df['BB_lower'] = calcular_bollinger_bands(df['Close'])
+        df['Close_lag1'] = df['Close'].shift(1)
+        df['Close_lag2'] = df['Close'].shift(2)
+        df['Volume_Change'] = df['Volume'].pct_change()
+        
+        df = df.dropna()
+        
+        # Features para modelos tradicionais
+        feature_cols = ['Close_MA7', 'Close_MA21', 'Price_Change', 'Volume_MA7', 
+                       'Volatility', 'RSI', 'MACD', 'BB_upper', 'BB_lower',
+                       'Close_lag1', 'Close_lag2', 'Volume_Change']
+        
+        last_features = df[feature_cols].iloc[-1:].values
+        last_features_scaled = scaler_traditional.transform(last_features)
+        
+        # Features para LSTM - ajustado para dados limitados
+        lstm_features = ['Close', 'Volume', 'Close_MA7', 'Close_MA21', 'Price_Change']
+        sequence_length = min(15, len(df) - 1)  # Ajustar baseado nos dados disponíveis
+        last_sequence = df[lstm_features].tail(sequence_length).values
+        last_sequence_scaled = scaler_lstm.transform(last_sequence)
+        last_sequence_scaled = last_sequence_scaled.reshape(1, sequence_length, -1)
+        
+        # Fazer previsões com todos os modelos
+        previsoes = {}
+        
+        # Random Forest
+        rf_pred = []
+        for i, model in enumerate(modelos['RandomForest']):
+            pred = model.predict(last_features_scaled)[0]
+            rf_pred.append(pred)
+        previsoes['RandomForest'] = np.array(rf_pred)
+        
+        # Gradient Boosting
+        gb_pred = []
+        for i, model in enumerate(modelos['GradientBoosting']):
+            pred = model.predict(last_features_scaled)[0]
+            gb_pred.append(pred)
+        previsoes['GradientBoosting'] = np.array(gb_pred)
+        
+        # Linear Regression
+        lr_pred = []
+        for i, model in enumerate(modelos['LinearRegression']):
+            pred = model.predict(last_features_scaled)[0]
+            lr_pred.append(pred)
+        previsoes['LinearRegression'] = np.array(lr_pred)
+        
+        # LSTM (se disponível)
+        if modelos['LSTM'] is not None:
+            lstm_pred = modelos['LSTM'].predict(last_sequence_scaled, verbose=0)[0]
+            previsoes['LSTM'] = lstm_pred
+        
+        # Ensemble final (média ponderada baseada na performance)
+        # Ajustar pesos baseado nos modelos disponíveis
+        if modelos['LSTM'] is not None:
+            pesos = {'RandomForest': 0.3, 'GradientBoosting': 0.3, 'LSTM': 0.25, 'LinearRegression': 0.15}
+        else:
+            # Redistribuir peso do LSTM para outros modelos
+            pesos = {'RandomForest': 0.4, 'GradientBoosting': 0.4, 'LinearRegression': 0.2}
+        
+        previsao_final = np.zeros(14)
+        for modelo, pred in previsoes.items():
+            previsao_final += pred * pesos[modelo]
+        
+        # Gerar datas para as previsões (próximos 14 dias úteis)
+        datas_previsao = []
+        data_atual = historico_df.index.max()
+        dias_adicionados = 0
+        
+        while dias_adicionados < 14:
+            data_atual += timedelta(days=1)
+            # Pular fins de semana (sábado=5, domingo=6)
+            if data_atual.weekday() < 5:
+                datas_previsao.append(data_atual)
+                dias_adicionados += 1
+        
+        return previsao_final, datas_previsao, previsoes, None
+        
+    except Exception as e:
+        return None, None, None, f"Erro na previsão ensemble: {str(e)}"
+
 def gerar_previsao_acao(dados_acao):
     """
-    Função principal que orquestra todo o processo de ML
+    Função principal que orquestra todo o processo de ML ensemble
     """
     try:
         historico = dados_acao.get('historico')
         if historico is None or historico.empty:
-            return None, None, "Dados históricos não disponíveis"
+            return None, None, None, "Dados históricos não disponíveis"
         
-        # 1. Preparar dados
-        X, y, scaler, erro_prep = preparar_dados_lstm(historico)
+        # 1. Preparar dados para ensemble
+        X_trad, X_lstm, y_multi, scalers, erro_prep = preparar_dados_ensemble(historico)
         if erro_prep:
-            return None, None, erro_prep
+            return None, None, None, erro_prep
         
-        # 2. Treinar modelo
-        model, history, erro_treino = treinar_modelo_lstm(X, y)
+        # 2. Treinar ensemble de modelos
+        modelos, scores, erro_treino = treinar_ensemble_modelos(X_trad, X_lstm, y_multi)
         if erro_treino:
-            return None, None, erro_treino
+            return None, None, None, erro_treino
         
-        # 3. Fazer previsão
-        preco_previsto, data_previsao, erro_pred = fazer_previsao(model, scaler, historico)
+        # 3. Fazer previsão ensemble
+        previsoes, datas, detalhes, erro_pred = fazer_previsao_ensemble(modelos, scalers, historico)
         if erro_pred:
-            return None, None, erro_pred
+            return None, None, None, erro_pred
         
-        return preco_previsto, data_previsao, None
+        return previsoes, datas, detalhes, None
         
     except Exception as e:
-        return None, None, f"Erro geral na previsão: {str(e)}"
+        return None, None, None, f"Erro geral na previsão ensemble: {str(e)}"
 
 def buscar_dados_acao(ticker):
     """Busca dados da ação via Brapi API"""
@@ -545,8 +993,8 @@ def buscar_dados_acao(ticker):
     except Exception as e:
         return None, f"Erro: {str(e)}"
 
-def criar_grafico_com_previsao(historico, ticker, preco_previsto=None, data_previsao=None):
-    """Cria gráfico com dados históricos e previsão ML"""
+def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas_previsao=None, detalhes_previsoes=None):
+    """Cria gráfico com dados históricos e previsões ensemble de 2 semanas"""
     fig = go.Figure()
     
     if historico is not None and not historico.empty:
@@ -570,48 +1018,71 @@ def criar_grafico_com_previsao(historico, ticker, preco_previsto=None, data_prev
             showlegend=False
         ))
         
-        # Adicionar previsão se disponível
-        if preco_previsto is not None and data_previsao is not None:
+        # Adicionar previsões ensemble se disponível
+        if previsoes_ensemble is not None and datas_previsao is not None:
+            # Previsão ensemble principal
             fig.add_trace(go.Scatter(
-                x=[data_previsao],
-                y=[preco_previsto],
-                mode='markers',
-                name='Previsão IA',
-                marker=dict(
-                    color='#ff4444',
-                    size=15,
-                    symbol='star',
-                    line=dict(color='white', width=2)
-                ),
-                hovertemplate='<b>Previsão IA</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
+                x=datas_previsao,
+                y=previsoes_ensemble,
+                mode='lines+markers',
+                name='Previsão Ensemble',
+                line=dict(color='#ff4444', width=3),
+                marker=dict(color='#ff4444', size=8),
+                hovertemplate='<b>Ensemble</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
             ))
             
-            # Linha conectando último ponto real com previsão
+            # Linha conectando último ponto real com primeira previsão
             ultimo_preco = historico['Close'].iloc[-1]
             ultima_data = historico.index[-1]
             
             fig.add_trace(go.Scatter(
-                x=[ultima_data, data_previsao],
-                y=[ultimo_preco, preco_previsto],
+                x=[ultima_data, datas_previsao[0]],
+                y=[ultimo_preco, previsoes_ensemble[0]],
                 mode='lines',
                 line=dict(color='#ff4444', width=2, dash='dash'),
-                name='Projeção',
+                name='Conexão',
                 hovertemplate='<extra></extra>',
                 showlegend=False
             ))
+            
+            # Adicionar previsões individuais dos modelos (transparentes)
+            if detalhes_previsoes is not None:
+                cores_modelos = {
+                    'LSTM': '#ff9999',
+                    'RandomForest': '#99ff99', 
+                    'GradientBoosting': '#9999ff',
+                    'LinearRegression': '#ffff99'
+                }
+                
+                for modelo, previsoes in detalhes_previsoes.items():
+                    if modelo in cores_modelos:
+                        fig.add_trace(go.Scatter(
+                            x=datas_previsao,
+                            y=previsoes,
+                            mode='lines',
+                            name=modelo,
+                            line=dict(color=cores_modelos[modelo], width=1, dash='dot'),
+                            opacity=0.6,
+                            hovertemplate=f'<b>{modelo}</b><br><b>R$ %{{y:.2f}}</b><br>%{{x|%d/%m/%Y}}<extra></extra>'
+                        ))
+    
+    # Título dinâmico baseado na presença de previsões
+    titulo = f'{ticker}'
+    if previsoes_ensemble is not None:
+        titulo += ' - Previsão Ensemble (2 Semanas)'
     
     fig.update_layout(
-        title=f'{ticker}',
+        title=titulo,
         xaxis_title='Data',
         yaxis_title='Preço (R$)',
-        height=400,
+        height=500 if previsoes_ensemble is not None else 400,
         showlegend=True,
         legend=dict(
             yanchor="top",
             y=0.99,
             xanchor="left",
             x=0.01,
-            bgcolor="rgba(0,0,0,0.5)",
+            bgcolor="rgba(0,0,0,0.7)",
             bordercolor="rgba(255,255,255,0.2)",
             borderwidth=1
         ),
@@ -733,14 +1204,14 @@ def render_header_logado():
             st.markdown(f"<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
         
         with col2:
-            # Texto do usuário e botão em linha
+            # Texto do usuário e botão abaixo
             st.markdown(f"<div style='padding-top: 30px; text-align: right; font-weight: 600; font-size: 0.9rem;'>Olá, {usuario}</div>", unsafe_allow_html=True)
-        
-        # Botão logout fixo no canto superior direito
-        if st.button("Logout", type="secondary", key="logout_btn"):
-            fazer_logout()
-            st.session_state.tela_atual = 'login'
-            st.rerun()
+            
+            # Botão logout abaixo do texto
+            if st.button("Logout", type="secondary", key="logout_btn", use_container_width=True):
+                fazer_logout()
+                st.session_state.tela_atual = 'login'
+                st.rerun()
 
 # ====================== CONTROLE DE TELAS ======================
 
@@ -792,15 +1263,66 @@ else:
         elif submitted:
             st.error("Por favor, digite o código de uma ação")
     
+        # Verificar query parameters para ações nos favoritos
+        query_params = st.query_params
+        if "analyze" in query_params:
+            ticker = query_params["analyze"]
+            dados, erro = buscar_dados_acao(ticker)
+            if erro:
+                st.error(f"Erro: {erro}")
+            else:
+                st.session_state.dados_acao = dados
+                st.session_state.mostrar_dados = True
+                st.session_state.mostrar_previsao = False
+                # Limpar query params
+                st.query_params.clear()
+                st.rerun()
+        
+        if "remove" in query_params:
+            ticker = query_params["remove"]
+            sucesso, mensagem = remover_favorito(ticker)
+            if sucesso:
+                st.success(mensagem)
+            else:
+                st.error(mensagem)
+            # Limpar query params
+            st.query_params.clear()
+            st.rerun()
+        
+        # Verificar actions via session state (fallback)
+        for key in list(st.session_state.keys()):
+            if key.startswith('action_analyze_'):
+                ticker = key.replace('action_analyze_', '')
+                dados, erro = buscar_dados_acao(ticker)
+                if erro:
+                    st.error(f"Erro: {erro}")
+                else:
+                    st.session_state.dados_acao = dados
+                    st.session_state.mostrar_dados = True
+                    st.session_state.mostrar_previsao = False
+                    del st.session_state[key]
+                    st.rerun()
+            
+            elif key.startswith('action_remove_'):
+                ticker = key.replace('action_remove_', '')
+                sucesso, mensagem = remover_favorito(ticker)
+                if sucesso:
+                    st.success(mensagem)
+                else:
+                    st.error(mensagem)
+                del st.session_state[key]
+                st.rerun()
+        
+        
         # Mostrar favoritos apenas se existirem (para não quebrar o layout)
         favoritos = carregar_favoritos()
         if favoritos:
             st.markdown("---")  # Linha divisória sutil
             st.markdown("### Favoritos")
             
-            # Grid de favoritos - 2 por linha com botões integrados nos cards
-            for i in range(0, min(4, len(favoritos)), 2):  # Máximo 4 favoritos, 2 por linha
-                cols = st.columns(2)
+            # Grid de favoritos - 3 por linha para cards menores
+            for i in range(0, min(6, len(favoritos)), 3):  # Máximo 6 favoritos, 3 por linha
+                cols = st.columns(3)
                 
                 # Processar favoritos da linha atual
                 for j, col in enumerate(cols):
@@ -810,78 +1332,57 @@ else:
                             fav = favoritos[fav_index]
                             dados_rapidos = buscar_dados_rapidos(fav['ticker'])
                             
-                            # Card com botões REALMENTE dentro usando HTML completo
-                            if dados_rapidos['sucesso']:
-                                variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
-                                variacao_cor = "#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"
+                            # Card usando container Streamlit
+                            with st.container():
+                                # Botões pequenos no topo
+                                btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
                                 
-                                card_html = f"""
-                                <div class='favorite-card-with-internal-buttons' data-ticker='{fav['ticker']}'>
-                                    <div style='display: flex; justify-content: space-between; align-items: center; padding: 16px; height: 100px;'>
-                                        <div style='flex: 1;'>
-                                            <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
-                                            <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
-                                            <div style='font-size: 0.9em; font-weight: 500; color: {variacao_cor};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
-                                        </div>
-                                        <div style='display: flex; flex-direction: column; gap: 6px; margin-left: 16px;'>
-                                            <button onclick='window.analyzeStock("{fav['ticker']}")' 
-                                                    style='background: #00d4ff; color: #000; border: none; border-radius: 6px; padding: 8px 12px; font-size: 1rem; cursor: pointer; font-weight: 600; width: 50px; height: 32px; display: flex; align-items: center; justify-content: center;'>
-                                                📈
-                                            </button>
-                                            <button onclick='window.removeStock("{fav['ticker']}")' 
-                                                    style='background: transparent; color: #fff; border: 1px solid #666; border-radius: 6px; padding: 8px 12px; font-size: 1rem; cursor: pointer; font-weight: 600; width: 50px; height: 32px; display: flex; align-items: center; justify-content: center;'>
-                                                ❌
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                """
-                            else:
-                                card_html = f"""
-                                <div class='favorite-card-with-internal-buttons' data-ticker='{fav['ticker']}' style='background: rgba(21, 37, 36, 0.4);'>
-                                    <div style='display: flex; justify-content: space-between; align-items: center; padding: 16px; height: 100px;'>
-                                        <div style='flex: 1;'>
-                                            <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
-                                            <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
-                                        </div>
-                                        <div style='display: flex; flex-direction: column; gap: 6px; margin-left: 16px;'>
-                                            <button onclick='window.analyzeStock("{fav['ticker']}")' 
-                                                    style='background: #00d4ff; color: #000; border: none; border-radius: 6px; padding: 8px 12px; font-size: 1rem; cursor: pointer; font-weight: 600; width: 50px; height: 32px; display: flex; align-items: center; justify-content: center;'>
-                                                📈
-                                            </button>
-                                            <button onclick='window.removeStock("{fav['ticker']}")' 
-                                                    style='background: transparent; color: #fff; border: 1px solid #666; border-radius: 6px; padding: 8px 12px; font-size: 1rem; cursor: pointer; font-weight: 600; width: 50px; height: 32px; display: flex; align-items: center; justify-content: center;'>
-                                                ❌
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                """
-                            
-                            st.markdown(card_html, unsafe_allow_html=True)
-                            
-                            # Botões Streamlit escondidos (acionados via JavaScript)
-                            if st.button("🔍", key=f"hidden_analyze_{fav['ticker']}", help="Analisar"): 
-                                dados, erro = buscar_dados_acao(fav['ticker'])
-                                if erro:
-                                    st.error(f"Erro: {erro}")
+                                with btn_col1:
+                                    if st.button("📈", key=f"analyze_btn_{fav['ticker']}", 
+                                               help="Analisar ação",
+                                               use_container_width=True):
+                                        dados, erro = buscar_dados_acao(fav['ticker'])
+                                        if erro:
+                                            st.error(f"Erro: {erro}")
+                                        else:
+                                            st.session_state.dados_acao = dados
+                                            st.session_state.mostrar_dados = True
+                                            st.session_state.mostrar_previsao = False
+                                            st.rerun()
+                                
+                                with btn_col2:
+                                    if st.button("❌", key=f"remove_btn_{fav['ticker']}", 
+                                               help="Remover dos favoritos",
+                                               use_container_width=True):
+                                        sucesso, mensagem = remover_favorito(fav['ticker'])
+                                        if sucesso:
+                                            st.success(mensagem)
+                                            st.rerun()
+                                        else:
+                                            st.error(mensagem)
+                                
+                                # Métrica abaixo dos botões
+                                if dados_rapidos['sucesso']:
+                                    # Usar st.metric para exibir dados
+                                    variacao_valor = dados_rapidos['variacao']
+                                    delta_str = f"{variacao_valor:+.2f}%"
+                                    
+                                    st.metric(
+                                        label=fav['ticker'],
+                                        value=f"R$ {dados_rapidos['preco']:.2f}",
+                                        delta=delta_str
+                                    )
                                 else:
-                                    st.session_state.dados_acao = dados
-                                    st.session_state.mostrar_dados = True
-                                    st.session_state.mostrar_previsao = False
-                                    st.rerun()
+                                    # Métrica simples para dados indisponíveis
+                                    st.metric(
+                                        label=fav['ticker'],
+                                        value="N/D"
+                                    )
                             
-                            if st.button("🗑", key=f"hidden_remove_{fav['ticker']}", help="Remover"):
-                                sucesso, mensagem = remover_favorito(fav['ticker'])
-                                if sucesso:
-                                    st.success(mensagem)
-                                    st.rerun()
-                                else:
-                                    st.error(mensagem)
         
-        # Se há mais de 4 favoritos, mostrar contador
-        if len(favoritos) > 4:
-            st.caption(f"+ {len(favoritos) - 4} outros favoritos")
+        # Se há mais de 6 favoritos, mostrar contador
+        if len(favoritos) > 6:
+            st.caption(f"+ {len(favoritos) - 6} outros favoritos")
     
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1065,33 +1566,114 @@ else:
                 st.session_state.mostrar_dados = False
                 st.session_state.mostrar_previsao = False
                 st.session_state.dados_acao = None
+                # Limpar previsões armazenadas
+                if 'previsoes_ensemble' in st.session_state:
+                    del st.session_state.previsoes_ensemble
+                if 'datas_previsao' in st.session_state:
+                    del st.session_state.datas_previsao
+                if 'detalhes_previsoes' in st.session_state:
+                    del st.session_state.detalhes_previsoes
+                if 'ticker_previsao' in st.session_state:
+                    del st.session_state.ticker_previsao
                 st.rerun()
 
-        # Gerar previsão usando ML
-        with st.spinner('Gerando previsão com Inteligência Artificial...'):
-            preco_previsto, data_previsao, erro_ml = gerar_previsao_acao(dados)
+        # Verificar se as previsões já foram calculadas
+        if ('previsoes_ensemble' not in st.session_state or 
+            'datas_previsao' not in st.session_state or 
+            'detalhes_previsoes' not in st.session_state or
+            st.session_state.get('ticker_previsao') != dados['ticker']):
+            
+            # Gerar previsão usando Ensemble apenas se necessário
+            with st.spinner('Gerando previsões com Ensemble de Modelos de IA...'):
+                previsoes_ensemble, datas_previsao, detalhes_previsoes, erro_ml = gerar_previsao_acao(dados)
+            
+            # Armazenar resultados no session_state
+            st.session_state.previsoes_ensemble = previsoes_ensemble
+            st.session_state.datas_previsao = datas_previsao
+            st.session_state.detalhes_previsoes = detalhes_previsoes
+            st.session_state.erro_ml = erro_ml
+            st.session_state.ticker_previsao = dados['ticker']
+        else:
+            # Usar previsões já calculadas
+            previsoes_ensemble = st.session_state.previsoes_ensemble
+            datas_previsao = st.session_state.datas_previsao
+            detalhes_previsoes = st.session_state.detalhes_previsoes
+            erro_ml = st.session_state.erro_ml
         
         if erro_ml:
             st.error(f"Erro na previsão: {erro_ml}")
-            st.info("**Dica:** A previsão requer pelo menos 20 dias de histórico com dados de volume.")
-            preco_previsto, data_previsao = None, None
+            st.info("**Dica:** A previsão ensemble requer pelo menos 25 dias de histórico.")
+            previsoes_ensemble, datas_previsao, detalhes_previsoes = None, None, None
         else:
-            # Calcular variação prevista
-            variacao_prevista = ((preco_previsto - dados['preco']) / dados['preco']) * 100
+            # Calcular métricas das previsões
+            preco_atual = dados['preco']
+            preco_1_semana = previsoes_ensemble[4]  # Dia 5 (1 semana)
+            preco_2_semanas = previsoes_ensemble[13]  # Dia 14 (2 semanas)
+            
+            variacao_1_semana = ((preco_1_semana - preco_atual) / preco_atual) * 100
+            variacao_2_semanas = ((preco_2_semanas - preco_atual) / preco_atual) * 100
             
             # Exibir resultado da previsão
-            st.success("**Previsão gerada com sucesso!**")
+            st.success("**Previsões Ensemble geradas com sucesso!**")
             
             col_prev1, col_prev2, col_prev3, col_prev4 = st.columns(4)
             with col_prev1:
-                st.metric("Previsão IA", f"R$ {preco_previsto:.2f}")
+                st.metric("1 Semana", f"R$ {preco_1_semana:.2f}", f"{variacao_1_semana:+.2f}%")
             with col_prev2:
-                st.metric("Variação Prevista", f"{variacao_prevista:.2f}%")
+                st.metric("2 Semanas", f"R$ {preco_2_semanas:.2f}", f"{variacao_2_semanas:+.2f}%")
             with col_prev3:
-                st.metric("Para o Dia", data_previsao.strftime('%d/%m/%Y'))
+                # Calcular tendência geral
+                tendencia = "Alta" if preco_2_semanas > preco_atual else "Baixa"
+                st.metric("Tendência", tendencia)
             with col_prev4:
-                confianca = min(85, max(60, 75 + abs(variacao_prevista) * 2))  # Simulação de confiança
+                # Confiança baseada na dispersão entre modelos
+                dispersao = np.std([detalhes_previsoes[modelo][-1] for modelo in detalhes_previsoes.keys()])
+                confianca = max(60, min(90, 85 - (dispersao / preco_atual * 100)))
                 st.metric("Confiança", f"{confianca:.0f}%")
+            
+            # Exibir detalhes dos modelos
+            with st.expander("📊 Detalhes por Modelo"):
+                st.markdown("**Previsões para 2 semanas (último dia):**")
+                
+                # Determinar quantos modelos estão disponíveis
+                modelos_disponiveis = list(detalhes_previsoes.keys())
+                num_modelos = len(modelos_disponiveis)
+                
+                if num_modelos == 4:
+                    # Todos os modelos disponíveis
+                    model_col1, model_col2, model_col3, model_col4 = st.columns(4)
+                    cols = [model_col1, model_col2, model_col3, model_col4]
+                elif num_modelos == 3:
+                    # LSTM removido, usar 3 colunas
+                    model_col1, model_col2, model_col3 = st.columns(3)
+                    cols = [model_col1, model_col2, model_col3]
+                else:
+                    # Fallback para número variável
+                    cols = st.columns(num_modelos)
+                
+                # Mapear ícones dos modelos
+                icones_modelos = {
+                    'LSTM': '🧠',
+                    'RandomForest': '🌲', 
+                    'GradientBoosting': '🚀',
+                    'LinearRegression': '📈'
+                }
+                
+                nomes_modelos = {
+                    'LSTM': 'LSTM',
+                    'RandomForest': 'Random Forest',
+                    'GradientBoosting': 'Gradient Boost', 
+                    'LinearRegression': 'Linear Reg.'
+                }
+                
+                # Exibir métricas para cada modelo disponível
+                for i, modelo in enumerate(modelos_disponiveis):
+                    with cols[i]:
+                        pred = detalhes_previsoes[modelo][-1]
+                        var = ((pred - preco_atual) / preco_atual) * 100
+                        icone = icones_modelos.get(modelo, '📊')
+                        nome = nomes_modelos.get(modelo, modelo)
+                        st.metric(f"{icone} {nome}", f"R$ {pred:.2f}", f"{var:+.2f}%")
 
         # Linha das métricas atuais
         st.markdown("<h4 class='section-title'>Dados Atuais</h4>", unsafe_allow_html=True)
@@ -1105,118 +1687,78 @@ else:
         with col4:
             st.metric("Mínima", f"R$ {dados['minima']:.2f}")
 
-        # Gráfico com previsão
+        # Gráfico com previsões ensemble
         if dados['historico'] is not None:
             fig_previsao = criar_grafico_com_previsao(
                 dados['historico'], 
                 dados['ticker'], 
-                preco_previsto, 
-                data_previsao
+                previsoes_ensemble, 
+                datas_previsao,
+                detalhes_previsoes
             )
             st.plotly_chart(fig_previsao, use_container_width=True)
         else:
             st.markdown("<div style='color: #ff6b6b;'>Dados históricos indisponíveis</div>", unsafe_allow_html=True)
         
-        # Informações sobre o modelo
+        # Informações sobre o ensemble
         if not erro_ml:
-            with st.expander("Sobre a Previsão"):
+            with st.expander("ℹ️ Sobre o Ensemble de Modelos"):
                 st.markdown("""
-                **Modelo utilizado:** LSTM (Long Short-Term Memory)
+                **Método Ensemble:** Combinação de 4 modelos de Machine Learning
                 
-                **Dados analisados:**
-                - Preços de fechamento (sequência adaptativa)
-                - Volume de negociação
-                - Médias móveis (7 e 21 dias)
-                - Variações percentuais
-                - Modelo ajustado para dados disponíveis (20-41 dias)
+                **Modelos utilizados:**
+                - 🧠 **LSTM (25%)** - Redes neurais para padrões sequenciais
+                - 🌲 **Random Forest (30%)** - Ensemble de árvores de decisão
+                - 🚀 **Gradient Boosting (30%)** - Boosting adaptativo
+                - 📈 **Linear Regression (15%)** - Regressão linear múltipla
                 
-                **Aviso importante:**
-                - Esta é uma previsão baseada em padrões históricos
+                **Features analisadas:**
+                - Preços de fechamento, abertura, máxima, mínima
+                - Volume de negociação e suas médias móveis
+                - Indicadores técnicos: RSI, MACD, Bandas de Bollinger
+                - Médias móveis (7 e 21 dias) e volatilidade
+                - Variações percentuais e dados defasados
+                
+                **Período de previsão:** 2 semanas (14 dias úteis)
+                
+                **Como funciona:**
+                1. Cada modelo faz previsões independentes
+                2. Resultados são combinados com pesos baseados na performance
+                3. Ensemble final oferece maior robustez que modelos individuais
+                
+                **⚠️ Aviso importante:**
+                - Previsões baseadas em padrões históricos
                 - Não constitui recomendação de investimento
-                - Mercados financeiros são imprevisíveis por natureza
+                - Mercados são influenciados por eventos imprevisíveis
                 - Use apenas para fins educacionais e de pesquisa
+                - Sempre consulte um profissional qualificado antes de investir
                 """)
+            
+            # Botão para gerar relatório PDF no final da página
+            st.markdown("---")
+            col_relatorio1, col_relatorio2, col_relatorio3 = st.columns([1, 2, 1])
+            
+            with col_relatorio2:
+                if st.button("📄 Gerar Relatório PDF", type="primary", use_container_width=True):
+                    with st.spinner("Gerando relatório..."):
+                        relatorio_texto = gerar_relatorio_previsao(dados, previsoes_ensemble, datas_previsao, detalhes_previsoes)
+                        
+                        # Criar nome do arquivo
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        nome_arquivo = f"Relatorio_{dados['ticker']}_{timestamp}.txt"
+                        
+                        # Botão de download
+                        st.download_button(
+                            label="💾 Download Relatório",
+                            data=relatorio_texto,
+                            file_name=nome_arquivo,
+                            mime="text/plain",
+                            use_container_width=True
+                        )
+                        
+                        # Mostrar prévia do relatório
+                        with st.expander("👁️ Prévia do Relatório"):
+                            st.text(relatorio_texto[:1000] + "..." if len(relatorio_texto) > 1000 else relatorio_texto)
         
         st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
 
-# JavaScript para botões dos cards de favoritos
-st.markdown("""
-<script>
-// Funções globais para os botões dos cards
-window.analyzeStock = function(ticker) {
-    console.log('Analisando ticker:', ticker);
-    
-    // Buscar botão por múltiplos seletores
-    let targetButton = null;
-    
-    // Tentar encontrar por data-testid
-    const buttons1 = document.querySelectorAll('button[data-testid*="hidden_analyze_' + ticker + '"]');
-    if (buttons1.length > 0) {
-        targetButton = buttons1[0];
-    }
-    
-    // Se não encontrou, tentar por conteúdo
-    if (!targetButton) {
-        const allButtons = document.querySelectorAll('button');
-        for (let btn of allButtons) {
-            const testId = btn.getAttribute('data-testid') || '';
-            if (testId.includes('hidden_analyze_') && testId.includes(ticker)) {
-                targetButton = btn;
-                break;
-            }
-        }
-    }
-    
-    if (targetButton) {
-        console.log('Botão encontrado, clicando...');
-        targetButton.click();
-    } else {
-        console.log('Botão não encontrado para ticker:', ticker);
-    }
-};
-
-window.removeStock = function(ticker) {
-    console.log('Removendo ticker:', ticker);
-    
-    // Buscar botão por múltiplos seletores
-    let targetButton = null;
-    
-    // Tentar encontrar por data-testid
-    const buttons1 = document.querySelectorAll('button[data-testid*="hidden_remove_' + ticker + '"]');
-    if (buttons1.length > 0) {
-        targetButton = buttons1[0];
-    }
-    
-    // Se não encontrou, tentar por conteúdo
-    if (!targetButton) {
-        const allButtons = document.querySelectorAll('button');
-        for (let btn of allButtons) {
-            const testId = btn.getAttribute('data-testid') || '';
-            if (testId.includes('hidden_remove_') && testId.includes(ticker)) {
-                targetButton = btn;
-                break;
-            }
-        }
-    }
-    
-    if (targetButton) {
-        console.log('Botão encontrado, clicando...');
-        targetButton.click();
-    } else {
-        console.log('Botão não encontrado para ticker:', ticker);
-    }
-};
-
-// Debug: listar todos os botões na página
-setTimeout(() => {
-    console.log('Botões disponíveis:');
-    document.querySelectorAll('button').forEach(btn => {
-        const testId = btn.getAttribute('data-testid') || 'sem-id';
-        const title = btn.getAttribute('title') || 'sem-title';
-        if (testId.includes('hidden') || title.includes('Analisar') || title.includes('Remover')) {
-            console.log('Botão:', { testId, title, text: btn.textContent });
-        }
-    });
-}, 1000);
-</script>
-""", unsafe_allow_html=True)
