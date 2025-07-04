@@ -279,14 +279,42 @@ div.block-container {
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-/* Botões dos favoritos - compactos e integrados */
-.favorite-card-with-buttons .stButton > button {
-    font-size: 0.8rem !important;
-    padding: 0.4rem 0.8rem !important;
+/* Botões dos favoritos - compactos e integrados ao lado direito */
+.favorite-card-with-buttons {
+    position: relative;
+    min-height: 100px;
+}
+
+/* Container dos botões */
+.favorite-card-with-buttons + div {
+    position: absolute;
+    top: 50%;
+    right: 16px;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+}
+
+/* Estilo individual dos botões */
+.favorite-card-with-buttons + div .stButton {
+    width: 40px !important;
     height: 32px !important;
-    margin-top: 0.5rem !important;
+}
+
+.favorite-card-with-buttons + div .stButton > button {
+    font-size: 1rem !important;
+    padding: 4px !important;
+    height: 32px !important;
+    width: 40px !important;
     border-radius: 6px !important;
     font-weight: 500 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 !important;
+    min-height: 32px !important;
 }
 
 /* Espaçamento para botões dos favoritos */
