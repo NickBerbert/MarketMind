@@ -261,9 +261,51 @@ div.block-container {
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
 }
 
-/* Espaçamento melhorado para favoritos */
-.favorite-card {
-    margin-bottom: 1rem !important;
+/* Cards com botões integrados */
+.favorite-card-with-buttons {
+    border: 1px solid #333;
+    border-radius: 12px;
+    margin: 8px 0 16px 0;
+    background: rgba(21, 37, 36, 0.7);
+    transition: all 0.2s ease;
+    font-family: 'Poppins', sans-serif;
+    overflow: hidden;
+}
+
+.favorite-card-with-buttons:hover {
+    border-color: #00d4ff;
+    background: rgba(21, 37, 36, 0.9);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
+}
+
+/* Botões dos cards */
+.card-btn {
+    font-family: 'Poppins', sans-serif !important;
+    transition: all 0.2s ease;
+}
+
+.card-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+.card-btn-primary:hover {
+    background: #0099cc !important;
+}
+
+.card-btn-secondary:hover {
+    background: rgba(255,255,255,0.1) !important;
+    border-color: #00d4ff !important;
+}
+
+/* Esconder botões Streamlit dos favoritos */
+button[data-testid="baseButton-primary"][title="Analisar ação"],
+button[data-testid="baseButton-secondary"][title="Remover dos favoritos"] {
+    display: none !important;
+    position: absolute !important;
+    left: -9999px !important;
+    visibility: hidden !important;
 }
 
 /* Espaçamento para botões dos favoritos */
