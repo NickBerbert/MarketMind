@@ -302,23 +302,23 @@ div.block-container {
     transition: transform 0.2s ease;
 }
 
-/* Esconder botões Streamlit dos favoritos de forma completa */
+/* Esconder botões Streamlit dos favoritos mantendo-os clicáveis */
 button[data-testid*="hidden_analyze_"],
 button[data-testid*="hidden_remove_"],
 button[title="Analisar"],
 button[title="Remover"] {
-    display: none !important;
-    position: absolute !important;
+    position: fixed !important;
     left: -9999px !important;
     top: -9999px !important;
-    visibility: hidden !important;
     opacity: 0 !important;
-    width: 0 !important;
-    height: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
     overflow: hidden !important;
+    z-index: -1000 !important;
+    pointer-events: auto !important;
 }
 
 /* Esconder botões com emojis específicos */

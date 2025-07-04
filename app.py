@@ -1144,27 +1144,79 @@ st.markdown("""
 <script>
 // Funções globais para os botões dos cards
 window.analyzeStock = function(ticker) {
-    // Encontrar e clicar no botão Streamlit correspondente
-    const buttons = document.querySelectorAll('button[title="Analisar"]');
-    for (let btn of buttons) {
-        const key = btn.getAttribute('data-testid') || '';
-        if (key.includes('hidden_analyze_' + ticker)) {
-            btn.click();
-            break;
+    console.log('Analisando ticker:', ticker);
+    
+    // Buscar botão por múltiplos seletores
+    let targetButton = null;
+    
+    // Tentar encontrar por data-testid
+    const buttons1 = document.querySelectorAll('button[data-testid*="hidden_analyze_' + ticker + '"]');
+    if (buttons1.length > 0) {
+        targetButton = buttons1[0];
+    }
+    
+    // Se não encontrou, tentar por conteúdo
+    if (!targetButton) {
+        const allButtons = document.querySelectorAll('button');
+        for (let btn of allButtons) {
+            const testId = btn.getAttribute('data-testid') || '';
+            if (testId.includes('hidden_analyze_') && testId.includes(ticker)) {
+                targetButton = btn;
+                break;
+            }
         }
+    }
+    
+    if (targetButton) {
+        console.log('Botão encontrado, clicando...');
+        targetButton.click();
+    } else {
+        console.log('Botão não encontrado para ticker:', ticker);
     }
 };
 
 window.removeStock = function(ticker) {
-    // Encontrar e clicar no botão Streamlit correspondente
-    const buttons = document.querySelectorAll('button[title="Remover"]');
-    for (let btn of buttons) {
-        const key = btn.getAttribute('data-testid') || '';
-        if (key.includes('hidden_remove_' + ticker)) {
-            btn.click();
-            break;
+    console.log('Removendo ticker:', ticker);
+    
+    // Buscar botão por múltiplos seletores
+    let targetButton = null;
+    
+    // Tentar encontrar por data-testid
+    const buttons1 = document.querySelectorAll('button[data-testid*="hidden_remove_' + ticker + '"]');
+    if (buttons1.length > 0) {
+        targetButton = buttons1[0];
+    }
+    
+    // Se não encontrou, tentar por conteúdo
+    if (!targetButton) {
+        const allButtons = document.querySelectorAll('button');
+        for (let btn of allButtons) {
+            const testId = btn.getAttribute('data-testid') || '';
+            if (testId.includes('hidden_remove_') && testId.includes(ticker)) {
+                targetButton = btn;
+                break;
+            }
         }
     }
+    
+    if (targetButton) {
+        console.log('Botão encontrado, clicando...');
+        targetButton.click();
+    } else {
+        console.log('Botão não encontrado para ticker:', ticker);
+    }
 };
+
+// Debug: listar todos os botões na página
+setTimeout(() => {
+    console.log('Botões disponíveis:');
+    document.querySelectorAll('button').forEach(btn => {
+        const testId = btn.getAttribute('data-testid') || 'sem-id';
+        const title = btn.getAttribute('title') || 'sem-title';
+        if (testId.includes('hidden') || title.includes('Analisar') || title.includes('Remover')) {
+            console.log('Botão:', { testId, title, text: btn.textContent });
+        }
+    });
+}, 1000);
 </script>
 """, unsafe_allow_html=True)
