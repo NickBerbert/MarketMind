@@ -397,14 +397,30 @@ div:has(button[data-testid*="hidden_remove_"]) {
     margin-bottom: 1rem;
 }
 
-/* Botão logout normal */
-button[data-testid*="logout_btn"] {
-    font-size: 0.8rem !important;
-    padding: 0.4rem 0.8rem !important;
-    min-height: 32px !important;
-    height: 32px !important;
-    border-radius: 6px !important;
-    font-weight: 500 !important;
-    margin-top: 0.5rem !important;
+/* Dropdown do usuário estilizado */
+[data-testid="stSelectbox"]:has(select[aria-label*="user_dropdown"]),
+select[data-testid*="user_dropdown"] {
+    text-align: right !important;
+}
+
+/* Container do dropdown alinhado à direita */
+div:has(select[aria-label=""]) {
+    text-align: right !important;
+}
+
+/* Estilizar o selectbox do usuário */
+div[data-testid="stSelectbox"] select {
+    font-size: 0.9rem !important;
+    font-weight: 600 !important;
+    background: transparent !important;
+    border: none !important;
+    color: white !important;
+    text-align: right !important;
+    padding-right: 20px !important;
+}
+
+/* Remover a seta do dropdown quando não está expandido */
+div[data-testid="stSelectbox"] {
+    text-align: right !important;
 }
 

@@ -1204,11 +1204,19 @@ def render_header_logado():
             st.markdown(f"<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
         
         with col2:
-            # Texto do usuário e botão abaixo
-            st.markdown(f"<div style='padding-top: 30px; text-align: right; font-weight: 600; font-size: 0.9rem;'>Olá, {usuario}</div>", unsafe_allow_html=True)
+            # Dropdown do usuário
+            st.markdown("<div style='padding-top: 30px; text-align: right;'>", unsafe_allow_html=True)
+            user_action = st.selectbox(
+                "",
+                ["Olá, " + usuario, "Logout"],
+                index=0,
+                key="user_dropdown",
+                label_visibility="collapsed"
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
             
-            # Botão logout abaixo do texto
-            if st.button("Logout", type="secondary", key="logout_btn", use_container_width=True):
+            # Verificar se logout foi selecionado
+            if user_action == "Logout":
                 fazer_logout()
                 st.session_state.tela_atual = 'login'
                 st.rerun()
