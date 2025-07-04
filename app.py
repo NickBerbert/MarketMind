@@ -810,7 +810,7 @@ else:
                             fav = favoritos[fav_index]
                             dados_rapidos = buscar_dados_rapidos(fav['ticker'])
                             
-                            # Card com botões integrados
+                            # Card com informações
                             if dados_rapidos['sucesso']:
                                 variacao_sinal = "+" if dados_rapidos['variacao'] >= 0 else ""
                                 variacao_cor = "#4ade80" if dados_rapidos["variacao"] >= 0 else "#f87171"
@@ -822,10 +822,6 @@ else:
                                         <div style='font-size: 1.3em; font-weight: 700; color: white; margin-bottom: 4px;'>R$ {dados_rapidos['preco']:.2f}</div>
                                         <div style='font-size: 0.9em; font-weight: 500; color: {variacao_cor};'>{variacao_sinal}{dados_rapidos['variacao']:.2f}%</div>
                                     </div>
-                                    <div style='padding: 8px 12px; border-top: 1px solid #333; background: rgba(0,0,0,0.2); display: flex; gap: 8px;'>
-                                        <button class='card-btn card-btn-primary' onclick='analyzeStock("{fav['ticker']}")' style='flex: 1; padding: 6px 8px; font-size: 0.75rem; border: none; border-radius: 4px; background: #00d4ff; color: #000; font-weight: 600; cursor: pointer;'>Analisar</button>
-                                        <button class='card-btn card-btn-secondary' onclick='removeStock("{fav['ticker']}")' style='flex: 1; padding: 6px 8px; font-size: 0.75rem; border: 1px solid #666; border-radius: 4px; background: transparent; color: #fff; cursor: pointer;'>Remover</button>
-                                    </div>
                                 </div>
                                 """
                             else:
@@ -835,33 +831,31 @@ else:
                                         <div style='font-weight: 600; font-size: 1.1em; color: #00d4ff; margin-bottom: 6px;'>{fav['ticker']}</div>
                                         <div style='font-size: 0.85em; color: #888;'>Dados indisponíveis</div>
                                     </div>
-                                    <div style='padding: 8px 12px; border-top: 1px solid #333; background: rgba(0,0,0,0.2); display: flex; gap: 8px;'>
-                                        <button class='card-btn card-btn-primary' onclick='analyzeStock("{fav['ticker']}")' style='flex: 1; padding: 6px 8px; font-size: 0.75rem; border: none; border-radius: 4px; background: #00d4ff; color: #000; font-weight: 600; cursor: pointer;'>Analisar</button>
-                                        <button class='card-btn card-btn-secondary' onclick='removeStock("{fav['ticker']}")' style='flex: 1; padding: 6px 8px; font-size: 0.75rem; border: 1px solid #666; border-radius: 4px; background: transparent; color: #fff; cursor: pointer;'>Remover</button>
-                                    </div>
                                 </div>
                                 """
                             
                             st.markdown(card_html, unsafe_allow_html=True)
                             
-                            # Botões Streamlit escondidos (acionados via JavaScript)
-                            if st.button("📊", key=f"analyze_{fav['ticker']}", help="Analisar ação"):
-                                dados, erro = buscar_dados_acao(fav['ticker'])
-                                if erro:
-                                    st.error(f"Erro: {erro}")
-                                else:
-                                    st.session_state.dados_acao = dados
-                                    st.session_state.mostrar_dados = True
-                                    st.session_state.mostrar_previsao = False
-                                    st.rerun()
-                            
-                            if st.button("🗑️", key=f"remove_{fav['ticker']}", help="Remover dos favoritos"):
-                                sucesso, mensagem = remover_favorito(fav['ticker'])
-                                if sucesso:
-                                    st.success(mensagem)
-                                    st.rerun()
-                                else:
-                                    st.error(mensagem)
+                            # Botões compactos integrados ao card
+                            btn_col1, btn_col2 = st.columns(2)
+                            with btn_col1:
+                                if st.button("Analisar", key=f"analyze_{fav['ticker']}", use_container_width=True, type="primary"):
+                                    dados, erro = buscar_dados_acao(fav['ticker'])
+                                    if erro:
+                                        st.error(f"Erro: {erro}")
+                                    else:
+                                        st.session_state.dados_acao = dados
+                                        st.session_state.mostrar_dados = True
+                                        st.session_state.mostrar_previsao = False
+                                        st.rerun()
+                            with btn_col2:
+                                if st.button("Remover", key=f"remove_{fav['ticker']}", use_container_width=True, type="secondary"):
+                                    sucesso, mensagem = remover_favorito(fav['ticker'])
+                                    if sucesso:
+                                        st.success(mensagem)
+                                        st.rerun()
+                                    else:
+                                        st.error(mensagem)
         
         # Se há mais de 4 favoritos, mostrar contador
         if len(favoritos) > 4:
@@ -1123,35 +1117,4 @@ else:
         
         st.markdown("</div>", unsafe_allow_html=True)  # Fecha tela-dados
 
-# JavaScript para interação com botões dos cards
-st.markdown("""
-<script>
-function analyzeStock(ticker) {
-    // Simular clique no botão escondido do Streamlit
-    const buttons = document.querySelectorAll('button[title="Analisar ação"]');
-    for (let btn of buttons) {
-        if (btn.textContent.includes('📊')) {
-            const key = btn.getAttribute('data-testid');
-            if (key && key.includes(ticker)) {
-                btn.click();
-                break;
-            }
-        }
-    }
-}
-
-function removeStock(ticker) {
-    // Simular clique no botão escondido do Streamlit
-    const buttons = document.querySelectorAll('button[title="Remover dos favoritos"]');
-    for (let btn of buttons) {
-        if (btn.textContent.includes('🗑️')) {
-            const key = btn.getAttribute('data-testid');
-            if (key && key.includes(ticker)) {
-                btn.click();
-                break;
-            }
-        }
-    }
-}
-</script>
-""", unsafe_allow_html=True)
+# Fim da aplicação
