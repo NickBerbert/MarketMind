@@ -17,6 +17,7 @@ import json
 import os
 from datetime import datetime
 from io import BytesIO
+from database import DatabaseManager
 warnings.filterwarnings('ignore')
 
 st.set_page_config(
@@ -34,61 +35,41 @@ def load_css():
         st.warning("⚠️ Arquivo styles.css não encontrado")
 
 load_css()
-USERS_FILE = "usuarios.json"
-FAVORITES_DIR = "favoritos_usuarios"
+db = DatabaseManager()
 
 def carregar_usuarios():
-    try:
-        if os.path.exists(USERS_FILE):
-            with open(USERS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
-    except Exception:
-        return {}
+    return db.obter_todos_usuarios()
 
 def salvar_usuarios(usuarios):
-    try:
-        with open(USERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(usuarios, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception:
-        return False
+    return True
 
 def hash_password(password):
     import hashlib
     return hashlib.sha256(password.encode()).hexdigest()
 
 def criar_usuario(username, email, password):
-    usuarios = carregar_usuarios()
-    
-    if username in usuarios:
+    if db.obter_usuario(username):
         return False, "Usuário já existe"
     
+    usuarios = db.obter_todos_usuarios()
     for user_data in usuarios.values():
         if user_data.get('email') == email:
             return False, "Email já cadastrado"
     
-    usuarios[username] = {
-        'email': email,
-        'password': hash_password(password),
-        'data_criacao': datetime.now().strftime('%d/%m/%Y %H:%M')
-    }
+    user_id = db.criar_usuario(username, email, hash_password(password))
     
-    if not os.path.exists(FAVORITES_DIR):
-        os.makedirs(FAVORITES_DIR)
-    
-    if salvar_usuarios(usuarios):
+    if user_id:
         return True, "Usuário criado com sucesso"
     else:
         return False, "Erro ao criar usuário"
 
 def autenticar_usuario(username, password):
-    usuarios = carregar_usuarios()
+    usuario = db.obter_usuario(username)
     
-    if username not in usuarios:
+    if not usuario:
         return False, "Usuário não encontrado"
     
-    if usuarios[username]['password'] != hash_password(password):
+    if usuario['password_hash'] != hash_password(password):
         return False, "Senha incorreta"
     
     return True, "Login realizado com sucesso"
@@ -109,9 +90,6 @@ def fazer_logout():
     if 'mostrar_previsao' in st.session_state:
         del st.session_state.mostrar_previsao
 
-def get_favorites_file(username):
-    return os.path.join(FAVORITES_DIR, f"{username}_favoritos.json")
-
 def carregar_favoritos(username=None):
     if username is None:
         username = get_usuario_logado()
@@ -119,56 +97,30 @@ def carregar_favoritos(username=None):
     if username is None:
         return []
     
-    try:
-        favorites_file = get_favorites_file(username)
-        if os.path.exists(favorites_file):
-            with open(favorites_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []
-    except Exception:
-        return []
+    return db.obter_favoritos_usuario_por_username(username)
 
 def salvar_favoritos(favoritos, username=None):
-    if username is None:
-        username = get_usuario_logado()
-    
-    if username is None:
-        return False
-    
-    try:
-        if not os.path.exists(FAVORITES_DIR):
-            os.makedirs(FAVORITES_DIR)
-        
-        favorites_file = get_favorites_file(username)
-        with open(favorites_file, 'w', encoding='utf-8') as f:
-            json.dump(favoritos, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception:
-        return False
+    return True
 
 def adicionar_favorito(ticker, nome, preco):
     username = get_usuario_logado()
     if username is None:
         return False, "Usuário não está logado"
     
-    favoritos = carregar_favoritos(username)
+    usuario = db.obter_usuario(username)
+    if not usuario:
+        return False, "Usuário não encontrado"
+    
+    favoritos = db.obter_favoritos_usuario(usuario['id'])
     
     for fav in favoritos:
         if fav['ticker'] == ticker:
             return False, "Ação já está nos favoritos"
     
-    novo_favorito = {
-        'ticker': ticker,
-        'nome': nome,
-        'preco': preco,
-        'data_adicao': datetime.now().strftime('%d/%m/%Y %H:%M')
-    }
-    
-    favoritos.append(novo_favorito)
-    
-    if salvar_favoritos(favoritos, username):
+    try:
+        db.adicionar_favorito_usuario(usuario['id'], ticker, nome, preco)
         return True, "Ação adicionada aos favoritos"
-    else:
+    except Exception:
         return False, "Erro ao salvar favorito"
 
 def remover_favorito(ticker):
@@ -176,12 +128,14 @@ def remover_favorito(ticker):
     if username is None:
         return False, "Usuário não está logado"
     
-    favoritos = carregar_favoritos(username)
-    favoritos = [fav for fav in favoritos if fav['ticker'] != ticker]
+    usuario = db.obter_usuario(username)
+    if not usuario:
+        return False, "Usuário não encontrado"
     
-    if salvar_favoritos(favoritos, username):
+    try:
+        db.remover_favorito_usuario(usuario['id'], ticker)
         return True, "Ação removida dos favoritos"
-    else:
+    except Exception:
         return False, "Erro ao remover favorito"
 
 def eh_favorito(ticker):
@@ -189,7 +143,7 @@ def eh_favorito(ticker):
     if username is None:
         return False
     
-    favoritos = carregar_favoritos(username)
+    favoritos = db.obter_favoritos_usuario_por_username(username)
     return any(fav['ticker'] == ticker for fav in favoritos)
 
 def buscar_dados_rapidos(ticker):
