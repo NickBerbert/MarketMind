@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(GIT_COMMITTER_NAME=\"Claude Assistant\" GIT_COMMITTER_EMAIL=\"claude@anthropic.com\" git commit --author=\"Claude Assistant <claude@anthropic.com>\" -m \"$(cat <<''EOF''\nImplementa sistema completo de autenticação com login/cadastro\n\n- Adiciona telas de login e cadastro com validação\n- Implementa hash de senhas com SHA256\n- Cria sistema de favoritos por usuário com arquivos separados\n- Adiciona gestão de sessão com logout automático\n- Modifica fluxo da aplicação para incluir autenticação obrigatória\n- Corrige estrutura de indentação e erros de sintaxe\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(GIT_COMMITTER_NAME=\"Claude Assistant\" GIT_COMMITTER_EMAIL=\"claude@anthropic.com\" git commit --author=\"Claude Assistant <claude@anthropic.com>\" -m \"$(cat <<''EOF''\nImplementa sistema completo de autenticação com login/cadastro\n\n- Adiciona telas de login e cadastro com validação\n- Implementa hash de senhas com SHA256\n- Cria sistema de favoritos por usuário com arquivos separados\n- Adiciona gestão de sessão com logout automático\n- Modifica fluxo da aplicação para incluir autenticação obrigatória\n- Corrige estrutura de indentação e erros de sintaxe\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(rm:*)"
     ],
     "deny": []
   }
