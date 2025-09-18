@@ -254,242 +254,533 @@ def calcular_bollinger_bands(prices, window=20, std_dev=2):
     lower = ma - (std * std_dev)
     return upper.fillna(prices), lower.fillna(prices)
 
-# Preparação de dados para machine learning
-def preparar_dados_ensemble(historico_df, dias_previsao=14):
+# Preparação de dados para machine learning - VERSÃO MELHORADA
+def preparar_dados_financeiros(historico_df, dias_previsao=5):
+    """
+    Prepara dados financeiros com features mais robustas e approach conservador
+    """
     try:
         if historico_df is None or historico_df.empty:
-            return None, None, None, None, "Dados históricos insuficientes"
-        
+            return None, None, None, "Dados históricos insuficientes"
+
         df = historico_df.copy()
-        
-        # Features técnicas
-        df['Close_MA7'] = df['Close'].rolling(window=7).mean()
-        df['Close_MA21'] = df['Close'].rolling(window=21).mean()
-        df['Price_Change'] = df['Close'].pct_change()
-        df['Volume_MA7'] = df['Volume'].rolling(window=7).mean()
-        df['Volatility'] = df['Close'].rolling(window=14).std()
-        df['RSI'] = calcular_rsi(df['Close'])
+
+        # Verificar dados mínimos necessários
+        if len(df) < 60:
+            return None, None, None, f"Histórico insuficiente: {len(df)} dias (mínimo: 60)"
+
+        # Features técnicas robustas
+        # 1. Médias móveis de diferentes períodos
+        df['SMA_5'] = df['Close'].rolling(window=5).mean()
+        df['SMA_10'] = df['Close'].rolling(window=10).mean()
+        df['SMA_20'] = df['Close'].rolling(window=20).mean()
+        df['EMA_12'] = df['Close'].ewm(span=12).mean()
+        df['EMA_26'] = df['Close'].ewm(span=26).mean()
+
+        # 2. Momentum e volatilidade
+        df['RSI'] = calcular_rsi(df['Close'], period=14)
         df['MACD'] = calcular_macd(df['Close'])
         df['BB_upper'], df['BB_lower'] = calcular_bollinger_bands(df['Close'])
-        df['Close_lag1'] = df['Close'].shift(1)
-        df['Close_lag2'] = df['Close'].shift(2)
-        df['Volume_Change'] = df['Volume'].pct_change()
-        
-        df = df.dropna()
-        
-        if len(df) < 25:
-            return None, None, None, None, f"Histórico insuficiente: {len(df)} dias (mínimo: 25)"
-        
-        feature_cols = ['Close_MA7', 'Close_MA21', 'Price_Change', 'Volume_MA7', 
-                       'Volatility', 'RSI', 'MACD', 'BB_upper', 'BB_lower',
-                       'Close_lag1', 'Close_lag2', 'Volume_Change']
-        
-        X_traditional = df[feature_cols].values
-        
-        # Dados para LSTM
-        sequence_length = min(15, int(len(df) * 0.4))
-        lstm_features = ['Close', 'Volume', 'Close_MA7', 'Close_MA21', 'Price_Change']
-        lstm_data = df[lstm_features].values
-        
-        # Normalização
-        scaler_traditional = MinMaxScaler()
-        scaler_lstm = MinMaxScaler()
-        X_traditional_scaled = scaler_traditional.fit_transform(X_traditional)
-        lstm_data_scaled = scaler_lstm.fit_transform(lstm_data)
-        
-        # Preparação de sequences para treinamento
-        y_multi, X_traditional_final, X_lstm_final = [], [], []
-        
-        for i in range(len(df) - dias_previsao):
-            future_prices = df['Close'].iloc[i+1:i+1+dias_previsao].values
-            if len(future_prices) == dias_previsao:
-                y_multi.append(future_prices)
-                X_traditional_final.append(X_traditional_scaled[i])
-                
-                if i >= sequence_length:
-                    X_lstm_final.append(lstm_data_scaled[i-sequence_length:i])
-        
-        min_samples = min(len(X_traditional_final), len(X_lstm_final))
-        if min_samples < 10:
-            return None, None, None, None, "Dados insuficientes para treinamento"
-        
-        return (np.array(X_traditional_final[-min_samples:]),
-                np.array(X_lstm_final[-min_samples:]),
-                np.array(y_multi[-min_samples:]),
-                (scaler_traditional, scaler_lstm),
-                None)
-        
-    except Exception as e:
-        return None, None, None, None, f"Erro ao preparar dados: {str(e)}"
+        df['BB_width'] = (df['BB_upper'] - df['BB_lower']) / df['Close']
+        df['BB_position'] = (df['Close'] - df['BB_lower']) / (df['BB_upper'] - df['BB_lower'])
 
-# Treinamento de modelos ensemble
-def treinar_ensemble_modelos(X_traditional, X_lstm, y_multi):
+        # 3. Retornos e volatilidade
+        df['Return_1d'] = df['Close'].pct_change()
+        df['Return_3d'] = df['Close'].pct_change(3)
+        df['Return_5d'] = df['Close'].pct_change(5)
+        df['Volatility_10d'] = df['Return_1d'].rolling(window=10).std()
+        df['Volatility_20d'] = df['Return_1d'].rolling(window=20).std()
+
+        # 4. Volume e liquidez
+        df['Volume_SMA_10'] = df['Volume'].rolling(window=10).mean()
+        df['Volume_ratio'] = df['Volume'] / df['Volume_SMA_10']
+        df['Price_Volume'] = df['Close'] * df['Volume']
+
+        # 5. Tendência e momentum
+        df['Price_above_SMA20'] = (df['Close'] > df['SMA_20']).astype(int)
+        df['SMA_trend'] = (df['SMA_5'] > df['SMA_20']).astype(int)
+        df['MACD_signal'] = df['MACD'].ewm(span=9).mean()
+        df['MACD_histogram'] = df['MACD'] - df['MACD_signal']
+
+        # 6. Variáveis de preço relativas (mais estáveis)
+        df['High_Low_ratio'] = (df['High'] - df['Low']) / df['Close']
+        df['Open_Close_ratio'] = (df['Close'] - df['Open']) / df['Open']
+
+        # Remover NaNs
+        df = df.dropna()
+
+        if len(df) < 40:
+            return None, None, None, "Dados insuficientes após limpeza"
+
+        # Features selecionadas (não correlacionadas)
+        feature_cols = [
+            'Return_1d', 'Return_3d', 'Return_5d',
+            'RSI', 'MACD', 'MACD_histogram',
+            'BB_width', 'BB_position',
+            'Volatility_10d', 'Volatility_20d',
+            'Volume_ratio', 'High_Low_ratio', 'Open_Close_ratio',
+            'Price_above_SMA20', 'SMA_trend'
+        ]
+
+        # Preparar dados para modelos
+        X = df[feature_cols].values
+
+        # Target: retorno percentual dos próximos dias (mais estável que preço absoluto)
+        y = []
+        for i in range(len(df) - dias_previsao):
+            current_price = df['Close'].iloc[i]
+            future_returns = []
+            for j in range(1, dias_previsao + 1):
+                if i + j < len(df):
+                    future_price = df['Close'].iloc[i + j]
+                    ret = (future_price - current_price) / current_price
+                    future_returns.append(ret)
+
+            if len(future_returns) == dias_previsao:
+                y.append(future_returns)
+
+        if len(y) < 20:
+            return None, None, None, "Dados insuficientes para criar targets"
+
+        X_final = X[:len(y)]
+        y_final = np.array(y)
+
+        return X_final, y_final, df, None
+
+    except Exception as e:
+        return None, None, None, f"Erro ao preparar dados: {str(e)}"
+
+# Sistema de validação temporal (Time Series Split)
+def criar_splits_temporais(X, y, n_splits=3):
+    """Cria splits temporais respeitando a ordem cronológica"""
+    splits = []
+    total_size = len(X)
+
+    for i in range(n_splits):
+        # Tamanho crescente do conjunto de treino
+        train_size = int(total_size * (0.5 + i * 0.15))
+        test_start = min(train_size, total_size - 10)  # Garantir pelo menos 10 amostras de teste
+
+        train_idx = list(range(train_size))
+        test_idx = list(range(test_start, min(test_start + 10, total_size)))
+
+        if len(test_idx) >= 5:  # Mínimo de amostras para teste
+            splits.append((train_idx, test_idx))
+
+    return splits
+
+# Novos modelos mais robustos
+def treinar_modelos_financeiros(X, y):
+    """
+    Treina modelos especializados para dados financeiros com validação temporal
+    """
     try:
-        split_idx = max(1, int(0.7 * len(X_traditional)))
-        
-        X_trad_train, X_trad_test = X_traditional[:split_idx], X_traditional[split_idx:]
-        X_lstm_train, X_lstm_test = X_lstm[:split_idx], X_lstm[split_idx:]
-        y_train, y_test = y_multi[:split_idx], y_multi[split_idx:]
-        
+        from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
+        from sklearn.linear_model import Ridge, ElasticNet
+        from sklearn.metrics import mean_absolute_error, mean_squared_error
+        import warnings
+        warnings.filterwarnings('ignore')
+
         modelos = {}
-        
-        # Random Forest para cada dia
-        rf_models = []
-        for dia in range(14):
-            rf = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42, n_jobs=-1)
-            rf.fit(X_trad_train, y_train[:, dia])
-            rf_models.append(rf)
-        modelos['RandomForest'] = rf_models
-        
-        # Gradient Boosting para cada dia
-        gb_models = []
-        for dia in range(14):
-            gb = GradientBoostingRegressor(n_estimators=50, max_depth=6, random_state=42)
-            gb.fit(X_trad_train, y_train[:, dia])
-            gb_models.append(gb)
-        modelos['GradientBoosting'] = gb_models
-        
-        # Linear Regression para cada dia
-        lr_models = []
-        for dia in range(14):
-            lr = LinearRegression()
-            lr.fit(X_trad_train, y_train[:, dia])
-            lr_models.append(lr)
-        modelos['LinearRegression'] = lr_models
-        
-        # LSTM
-        try:
-            if len(X_lstm_train) >= 5:
-                lstm_model = Sequential([
-                    LSTM(32, return_sequences=False, input_shape=(X_lstm.shape[1], X_lstm.shape[2])),
-                    Dropout(0.3),
-                    Dense(16, activation='relu'),
-                    Dense(14)
-                ])
-                
-                lstm_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-                
-                epochs = min(20, max(5, len(X_lstm_train)))
-                batch_size = max(1, min(4, len(X_lstm_train) // 3))
-                
-                with st.spinner('Treinando modelo LSTM...'):
-                    lstm_model.fit(X_lstm_train, y_train, epochs=epochs, batch_size=batch_size, verbose=0)
-                
-                modelos['LSTM'] = lstm_model
-            else:
-                modelos['LSTM'] = None
-        except Exception:
-            modelos['LSTM'] = None
-        
-        return modelos, {}, None
-        
+        scores = {}
+
+        # Configurações dos modelos (mais conservadoras)
+        model_configs = {
+            'RandomForest': RandomForestRegressor(
+                n_estimators=100,
+                max_depth=8,
+                min_samples_split=10,
+                min_samples_leaf=5,
+                random_state=42,
+                n_jobs=-1
+            ),
+            'ExtraTrees': ExtraTreesRegressor(
+                n_estimators=100,
+                max_depth=6,
+                min_samples_split=15,
+                min_samples_leaf=7,
+                random_state=42,
+                n_jobs=-1
+            ),
+            'Ridge': Ridge(alpha=1.0, random_state=42),
+            'ElasticNet': ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=42)
+        }
+
+        # Validação temporal para cada modelo
+        splits = criar_splits_temporais(X, y, n_splits=3)
+
+        if not splits:
+            # Fallback: split simples se não conseguir criar splits temporais
+            split_point = int(0.8 * len(X))
+            X_train, X_test = X[:split_point], X[split_point:]
+            y_train, y_test = y[:split_point], y[split_point:]
+
+            for nome, modelo_base in model_configs.items():
+                try:
+                    # Treinar um modelo para cada dia de previsão
+                    modelos_dias = []
+                    for dia in range(y.shape[1]):
+                        modelo = model_configs[nome]
+                        modelo.fit(X_train, y_train[:, dia])
+                        modelos_dias.append(modelo)
+
+                    modelos[nome] = modelos_dias
+
+                    # Calcular score médio
+                    pred_test = np.array([m.predict(X_test) for m in modelos_dias]).T
+                    mae = mean_absolute_error(y_test, pred_test)
+                    scores[nome] = {'mae': mae, 'confidence': max(0.3, 1.0 - mae * 10)}
+
+                except Exception as e:
+                    print(f"Erro no modelo {nome}: {e}")
+                    continue
+        else:
+            # Validação temporal robusta
+            for nome, modelo_base in model_configs.items():
+                try:
+                    fold_scores = []
+                    modelos_finais = []
+
+                    # Treinar e validar em cada fold temporal
+                    for train_idx, test_idx in splits:
+                        X_train_fold = X[train_idx]
+                        X_test_fold = X[test_idx]
+                        y_train_fold = y[train_idx]
+                        y_test_fold = y[test_idx]
+
+                        # Treinar modelos para cada dia
+                        modelos_fold = []
+                        for dia in range(y.shape[1]):
+                            modelo = model_configs[nome]
+                            modelo.fit(X_train_fold, y_train_fold[:, dia])
+                            modelos_fold.append(modelo)
+
+                        # Validar
+                        pred_fold = np.array([m.predict(X_test_fold) for m in modelos_fold]).T
+                        mae_fold = mean_absolute_error(y_test_fold, pred_fold)
+                        fold_scores.append(mae_fold)
+
+                        modelos_finais = modelos_fold  # Manter o último conjunto de modelos
+
+                    # Scores finais
+                    mae_media = np.mean(fold_scores)
+                    mae_std = np.std(fold_scores)
+                    confidence = max(0.4, min(0.9, 1.0 - mae_media * 15))
+
+                    modelos[nome] = modelos_finais
+                    scores[nome] = {
+                        'mae': mae_media,
+                        'mae_std': mae_std,
+                        'confidence': confidence
+                    }
+
+                except Exception as e:
+                    print(f"Erro no modelo {nome}: {e}")
+                    continue
+
+        return modelos, scores, None
+
     except Exception as e:
         return None, None, f"Erro no treinamento: {str(e)}"
 
-# Previsão ensemble
-def fazer_previsao_ensemble(modelos, scalers, historico_df):
+# Nova função de previsão melhorada
+def fazer_previsao_financeira(modelos, scores, df_original, X_features):
+    """
+    Faz previsões com base em retornos percentuais e converte para preços
+    """
     try:
-        scaler_traditional, scaler_lstm = scalers
-        
-        df = historico_df.copy()
-        
-        # Recalcular features
-        df['Close_MA7'] = df['Close'].rolling(window=7).mean()
-        df['Close_MA21'] = df['Close'].rolling(window=21).mean()
-        df['Price_Change'] = df['Close'].pct_change()
-        df['Volume_MA7'] = df['Volume'].rolling(window=7).mean()
-        df['Volatility'] = df['Close'].rolling(window=14).std()
-        df['RSI'] = calcular_rsi(df['Close'])
-        df['MACD'] = calcular_macd(df['Close'])
-        df['BB_upper'], df['BB_lower'] = calcular_bollinger_bands(df['Close'])
-        df['Close_lag1'] = df['Close'].shift(1)
-        df['Close_lag2'] = df['Close'].shift(2)
-        df['Volume_Change'] = df['Volume'].pct_change()
-        
-        df = df.dropna()
-        
-        feature_cols = ['Close_MA7', 'Close_MA21', 'Price_Change', 'Volume_MA7', 
-                       'Volatility', 'RSI', 'MACD', 'BB_upper', 'BB_lower',
-                       'Close_lag1', 'Close_lag2', 'Volume_Change']
-        
-        last_features = df[feature_cols].iloc[-1:].values
-        last_features_scaled = scaler_traditional.transform(last_features)
-        
-        # Previsões dos modelos
-        previsoes = {}
-        
-        # Random Forest
-        rf_pred = [model.predict(last_features_scaled)[0] for model in modelos['RandomForest']]
-        previsoes['RandomForest'] = np.array(rf_pred)
-        
-        # Gradient Boosting
-        gb_pred = [model.predict(last_features_scaled)[0] for model in modelos['GradientBoosting']]
-        previsoes['GradientBoosting'] = np.array(gb_pred)
-        
-        # Linear Regression
-        lr_pred = [model.predict(last_features_scaled)[0] for model in modelos['LinearRegression']]
-        previsoes['LinearRegression'] = np.array(lr_pred)
-        
-        # LSTM
-        if modelos['LSTM'] is not None:
-            lstm_features = ['Close', 'Volume', 'Close_MA7', 'Close_MA21', 'Price_Change']
-            sequence_length = min(15, len(df) - 1)
-            last_sequence = df[lstm_features].tail(sequence_length).values
-            last_sequence_scaled = scaler_lstm.transform(last_sequence)
-            last_sequence_scaled = last_sequence_scaled.reshape(1, sequence_length, -1)
-            
-            lstm_pred = modelos['LSTM'].predict(last_sequence_scaled, verbose=0)[0]
-            previsoes['LSTM'] = lstm_pred
-        
-        # Pesos do ensemble
-        if modelos['LSTM'] is not None:
-            pesos = {'RandomForest': 0.3, 'GradientBoosting': 0.3, 'LSTM': 0.25, 'LinearRegression': 0.15}
+        # Pegar as features da última observação
+        last_features = X_features[-1:].reshape(1, -1)
+
+        # Preço atual para conversão
+        preco_atual = df_original['Close'].iloc[-1]
+
+        # Previsões de cada modelo (retornos percentuais)
+        previsoes_retornos = {}
+        pesos_modelos = {}
+
+        for nome_modelo, lista_modelos in modelos.items():
+            try:
+                # Pegar o score de confiança do modelo
+                confianca = scores.get(nome_modelo, {}).get('confidence', 0.5)
+                pesos_modelos[nome_modelo] = confianca
+
+                # Fazer previsão para cada dia
+                pred_dias = []
+                for modelo_dia in lista_modelos:
+                    pred = modelo_dia.predict(last_features)[0]
+                    pred_dias.append(pred)
+
+                previsoes_retornos[nome_modelo] = np.array(pred_dias)
+
+            except Exception as e:
+                print(f"Erro no modelo {nome_modelo}: {e}")
+                continue
+
+        if not previsoes_retornos:
+            return None, None, None, None, "Nenhum modelo conseguiu fazer previsões"
+
+        # Normalizar pesos
+        total_peso = sum(pesos_modelos.values())
+        if total_peso > 0:
+            pesos_modelos = {k: v/total_peso for k, v in pesos_modelos.items()}
         else:
-            pesos = {'RandomForest': 0.4, 'GradientBoosting': 0.4, 'LinearRegression': 0.2}
-        
-        # Previsão final
-        previsao_final = np.zeros(14)
-        for modelo, pred in previsoes.items():
-            previsao_final += pred * pesos[modelo]
-        
-        # Datas de previsão (apenas dias úteis)
+            # Pesos iguais se não tiver scores
+            peso_igual = 1.0 / len(pesos_modelos)
+            pesos_modelos = {k: peso_igual for k in pesos_modelos.keys()}
+
+        # Ensemble das previsões (média ponderada)
+        num_dias = len(list(previsoes_retornos.values())[0])
+        previsao_retornos_ensemble = np.zeros(num_dias)
+
+        for nome_modelo, pred_retornos in previsoes_retornos.items():
+            peso = pesos_modelos[nome_modelo]
+            previsao_retornos_ensemble += pred_retornos * peso
+
+        # Converter retornos para preços absolutos
+        previsao_precos = []
+        preco_base = preco_atual
+
+        for i, retorno in enumerate(previsao_retornos_ensemble):
+            # Limitar retornos extremos (máximo ±20% por dia)
+            retorno_limitado = np.clip(retorno, -0.20, 0.20)
+            novo_preco = preco_base * (1 + retorno_limitado)
+            previsao_precos.append(novo_preco)
+            preco_base = novo_preco  # Usar o preço previsto como base para o próximo dia
+
+        previsao_precos = np.array(previsao_precos)
+
+        # Criar datas de previsão (apenas dias úteis)
         datas_previsao = []
-        data_atual = historico_df.index.max()
+        data_atual = df_original.index.max()
         dias_adicionados = 0
-        
-        while dias_adicionados < 14:
+
+        while dias_adicionados < num_dias:
             data_atual += timedelta(days=1)
-            if data_atual.weekday() < 5:
+            if data_atual.weekday() < 5:  # Segunda a sexta
                 datas_previsao.append(data_atual)
                 dias_adicionados += 1
-        
-        return previsao_final, datas_previsao, previsoes, None
-        
-    except Exception as e:
-        return None, None, None, f"Erro na previsão: {str(e)}"
 
+        # Calcular confiança geral baseada na concordância entre modelos
+        if len(previsoes_retornos) > 1:
+            # Calcular dispersão entre modelos
+            retornos_array = np.array([pred for pred in previsoes_retornos.values()])
+            dispersao = np.std(retornos_array, axis=0).mean()
+
+            # Confiança inversamente proporcional à dispersão
+            confianca_geral = max(0.5, min(0.9, 1.0 - dispersao * 20))
+        else:
+            # Se só tem um modelo, usar a confiança dele
+            confianca_geral = list(scores.values())[0].get('confidence', 0.6)
+
+        return previsao_precos, datas_previsao, previsoes_retornos, confianca_geral, None
+
+    except Exception as e:
+        return None, None, None, None, f"Erro na previsão: {str(e)}"
+
+# Nova função principal para previsões
 def gerar_previsao_acao(dados_acao):
+    """
+    Função principal melhorada para gerar previsões de ações
+    """
     try:
         historico = dados_acao.get('historico')
         if historico is None or historico.empty:
-            return None, None, None, "Dados históricos não disponíveis"
-        
-        X_trad, X_lstm, y_multi, scalers, erro_prep = preparar_dados_ensemble(historico)
+            return None, None, None, None, "Dados históricos não disponíveis"
+
+        # Preparar dados com novo sistema
+        X, y, df_features, erro_prep = preparar_dados_financeiros(historico, dias_previsao=5)
         if erro_prep:
-            return None, None, None, erro_prep
-        
-        modelos, scores, erro_treino = treinar_ensemble_modelos(X_trad, X_lstm, y_multi)
+            return None, None, None, None, erro_prep
+
+        # Treinar modelos com validação temporal
+        modelos, scores, erro_treino = treinar_modelos_financeiros(X, y)
         if erro_treino:
-            return None, None, None, erro_treino
-        
-        previsoes, datas, detalhes, erro_pred = fazer_previsao_ensemble(modelos, scalers, historico)
+            return None, None, None, None, erro_treino
+
+        if not modelos:
+            return None, None, None, None, "Nenhum modelo foi treinado com sucesso"
+
+        # Fazer previsões
+        previsoes, datas, detalhes, confianca, erro_pred = fazer_previsao_financeira(
+            modelos, scores, df_features, X
+        )
+
         if erro_pred:
-            return None, None, None, erro_pred
-        
-        return previsoes, datas, detalhes, None
-        
+            return None, None, None, None, erro_pred
+
+        return previsoes, datas, detalhes, confianca, None
+
     except Exception as e:
-        return None, None, None, f"Erro na previsão: {str(e)}"
+        return None, None, None, None, f"Erro na previsão: {str(e)}"
+
+# Sistema de Backtesting para Validação de Previsões
+def fazer_backtesting(dados_acao, dias_retroativos=10, valor_investimento=1000):
+    """
+    Simula investimentos baseados nas previsões dos dias anteriores
+    """
+    try:
+        historico = dados_acao.get('historico')
+        if historico is None or historico.empty or len(historico) < 70:
+            return None, "Dados históricos insuficientes para backtesting"
+
+        resultados = []
+
+        # Simular previsões para os últimos N dias
+        for i in range(dias_retroativos, 0, -1):
+            # Cortar histórico até N dias atrás
+            historico_corte = historico.iloc[:-i].copy()
+
+            if len(historico_corte) < 60:
+                continue
+
+            # Fazer previsão com dados até aquele ponto
+            X, y, df_features, erro_prep = preparar_dados_financeiros(historico_corte, dias_previsao=5)
+            if erro_prep:
+                continue
+
+            modelos, scores, erro_treino = treinar_modelos_financeiros(X, y)
+            if erro_treino or not modelos:
+                continue
+
+            previsoes, datas, detalhes, confianca, erro_pred = fazer_previsao_financeira(
+                modelos, scores, df_features, X
+            )
+
+            if erro_pred or previsoes is None:
+                continue
+
+            # Dados do dia da "decisão"
+            data_decisao = historico_corte.index[-1]
+            preco_compra = historico_corte['Close'].iloc[-1]
+
+            # Resultado real após 1 dia e 5 dias
+            try:
+                # Encontrar os índices correspondentes no histórico completo
+                idx_decisao = historico.index.get_loc(data_decisao)
+
+                # Resultado 1 dia depois
+                retorno_real_1d = None
+                preco_real_1d = None
+                if idx_decisao + 1 < len(historico):
+                    preco_real_1d = historico['Close'].iloc[idx_decisao + 1]
+                    retorno_real_1d = (preco_real_1d - preco_compra) / preco_compra
+
+                # Resultado 5 dias depois
+                retorno_real_5d = None
+                preco_real_5d = None
+                if idx_decisao + 5 < len(historico):
+                    preco_real_5d = historico['Close'].iloc[idx_decisao + 5]
+                    retorno_real_5d = (preco_real_5d - preco_compra) / preco_compra
+
+                # Previsões
+                retorno_previsto_1d = (previsoes[0] - preco_compra) / preco_compra
+                retorno_previsto_5d = (previsoes[4] - preco_compra) / preco_compra
+
+                # Simular decisão de investimento baseada na previsão
+                # Investir apenas se a previsão for positiva e confiança > 60%
+                deveria_investir = retorno_previsto_5d > 0.02 and confianca > 0.6  # 2% mínimo e 60% confiança
+
+                resultado = {
+                    'data_decisao': data_decisao.strftime('%d/%m/%Y'),
+                    'preco_compra': preco_compra,
+                    'previsao_1d': previsoes[0] if previsoes is not None else None,
+                    'previsao_5d': previsoes[4] if previsoes is not None else None,
+                    'retorno_previsto_1d': retorno_previsto_1d,
+                    'retorno_previsto_5d': retorno_previsto_5d,
+                    'preco_real_1d': preco_real_1d,
+                    'preco_real_5d': preco_real_5d,
+                    'retorno_real_1d': retorno_real_1d,
+                    'retorno_real_5d': retorno_real_5d,
+                    'confianca': confianca,
+                    'deveria_investir': deveria_investir,
+                    'acerto_direcao_1d': None,
+                    'acerto_direcao_5d': None,
+                    'lucro_1d': None,
+                    'lucro_5d': None
+                }
+
+                # Calcular acertos de direção
+                if retorno_real_1d is not None:
+                    resultado['acerto_direcao_1d'] = (retorno_previsto_1d > 0) == (retorno_real_1d > 0)
+                    if deveria_investir:
+                        resultado['lucro_1d'] = valor_investimento * retorno_real_1d
+
+                if retorno_real_5d is not None:
+                    resultado['acerto_direcao_5d'] = (retorno_previsto_5d > 0) == (retorno_real_5d > 0)
+                    if deveria_investir:
+                        resultado['lucro_5d'] = valor_investimento * retorno_real_5d
+
+                resultados.append(resultado)
+
+            except Exception as e:
+                print(f"Erro ao processar data {data_decisao}: {e}")
+                continue
+
+        return resultados, None
+
+    except Exception as e:
+        return None, f"Erro no backtesting: {str(e)}"
+
+def analisar_performance_backtesting(resultados_backtesting):
+    """
+    Analisa os resultados do backtesting e gera métricas de performance
+    """
+    if not resultados_backtesting:
+        return None
+
+    # Filtrar apenas resultados válidos
+    resultados_validos = [r for r in resultados_backtesting if r['retorno_real_5d'] is not None]
+    investimentos_feitos = [r for r in resultados_validos if r['deveria_investir']]
+
+    if not resultados_validos:
+        return None
+
+    # Métricas gerais
+    total_simulacoes = len(resultados_validos)
+    total_investimentos = len(investimentos_feitos)
+
+    # Acurácia de direção
+    acertos_1d = [r for r in resultados_validos if r['acerto_direcao_1d']]
+    acertos_5d = [r for r in resultados_validos if r['acerto_direcao_5d']]
+
+    acuracia_1d = len(acertos_1d) / total_simulacoes if total_simulacoes > 0 else 0
+    acuracia_5d = len(acertos_5d) / total_simulacoes if total_simulacoes > 0 else 0
+
+    # Performance financeira (apenas investimentos feitos)
+    if investimentos_feitos:
+        lucros_1d = [r['lucro_1d'] for r in investimentos_feitos if r['lucro_1d'] is not None]
+        lucros_5d = [r['lucro_5d'] for r in investimentos_feitos if r['lucro_5d'] is not None]
+
+        lucro_total_1d = sum(lucros_1d) if lucros_1d else 0
+        lucro_total_5d = sum(lucros_5d) if lucros_5d else 0
+
+        investimentos_positivos_5d = len([l for l in lucros_5d if l > 0])
+        taxa_sucesso = investimentos_positivos_5d / len(lucros_5d) if lucros_5d else 0
+
+        # Retorno médio
+        retorno_medio_5d = sum([r['retorno_real_5d'] for r in investimentos_feitos]) / len(investimentos_feitos)
+    else:
+        lucro_total_1d = 0
+        lucro_total_5d = 0
+        taxa_sucesso = 0
+        retorno_medio_5d = 0
+
+    # Confiança média
+    confianca_media = sum([r['confianca'] for r in resultados_validos]) / total_simulacoes
+
+    return {
+        'total_simulacoes': total_simulacoes,
+        'total_investimentos': total_investimentos,
+        'acuracia_direcao_1d': acuracia_1d,
+        'acuracia_direcao_5d': acuracia_5d,
+        'lucro_total_1d': lucro_total_1d,
+        'lucro_total_5d': lucro_total_5d,
+        'taxa_sucesso_investimentos': taxa_sucesso,
+        'retorno_medio_5d': retorno_medio_5d,
+        'confianca_media': confianca_media,
+        'resultados_detalhados': resultados_validos
+    }
 
 # Geração de relatório de previsão
 def gerar_relatorio_previsao(dados_acao, previsoes_ensemble, datas_previsao, detalhes_previsoes):
@@ -627,20 +918,30 @@ if 'tela_atual' not in st.session_state:
 # Telas de interface
 def render_login():
     st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
-    st.markdown("<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
-    st.markdown("### Login")
-    
-    with st.form("login_form"):
-        username = st.text_input("Usuário", placeholder="Digite seu usuário")
-        password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            login_button = st.form_submit_button("Entrar", type="primary", use_container_width=True)
-        with col2:
-            if st.form_submit_button("Criar Conta", use_container_width=True):
-                st.session_state.tela_atual = 'cadastro'
-                st.rerun()
+
+    # Header centralizado e maior
+    col1, col2, col3 = st.columns([0.5, 3, 0.5])
+    with col2:
+        st.markdown("<h1 style='text-align: center; color: white; font-size: 3rem; font-weight: 600; font-family: Poppins, sans-serif; letter-spacing: -0.02em; margin-bottom: 1.5rem;'>MarketMind</h1>", unsafe_allow_html=True)
+
+    # Formulário centralizado
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.markdown("### Login")
+
+        with st.form("login_form"):
+            username = st.text_input("Usuário", placeholder="Digite seu usuário")
+            password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
+
+            # Botões alinhados com os inputs
+            st.markdown("<br>", unsafe_allow_html=True)  # Espaço antes dos botões
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                login_button = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+            with col_btn2:
+                if st.form_submit_button("Criar Conta", use_container_width=True):
+                    st.session_state.tela_atual = 'cadastro'
+                    st.rerun()
     
     if login_button:
         if username and password:
@@ -659,22 +960,31 @@ def render_login():
 
 def render_cadastro():
     st.markdown("<div class='screen-entrada'>", unsafe_allow_html=True)
-    st.markdown("<h1 class='main-header'>MarketMind</h1>", unsafe_allow_html=True)
-    st.markdown("### Criar Conta")
-    
-    with st.form("cadastro_form"):
-        username = st.text_input("Usuário", placeholder="Nome de usuário")
-        email = st.text_input("Email", placeholder="Seu email")
-        password = st.text_input("Senha", type="password", placeholder="Sua senha")
-        password_confirm = st.text_input("Confirmar Senha", type="password", placeholder="Confirme a senha")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            cadastro_button = st.form_submit_button("Criar Conta", type="primary", use_container_width=True)
-        with col2:
-            if st.form_submit_button("Voltar", use_container_width=True):
-                st.session_state.tela_atual = 'login'
-                st.rerun()
+
+    # Header centralizado
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<h1 style='text-align: center; color: #00d4ff; font-size: 2.2rem; font-weight: 600; font-family: Poppins, sans-serif; letter-spacing: -0.02em; margin-bottom: 1rem;'>MarketMind</h1>", unsafe_allow_html=True)
+
+    # Formulário centralizado
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.markdown("### Criar Conta")
+
+        with st.form("cadastro_form"):
+            username = st.text_input("Usuário", placeholder="Nome de usuário")
+            email = st.text_input("Email", placeholder="Seu email")
+            password = st.text_input("Senha", type="password", placeholder="Sua senha")
+            password_confirm = st.text_input("Confirmar Senha", type="password", placeholder="Confirme a senha")
+
+            # Botões alinhados com os inputs
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                cadastro_button = st.form_submit_button("Criar Conta", type="primary")
+            with col_btn2:
+                if st.form_submit_button("Voltar"):
+                    st.session_state.tela_atual = 'login'
+                    st.rerun()
     
     if cadastro_button:
         if all([username, email, password, password_confirm]):
@@ -953,17 +1263,19 @@ else:
             st.session_state.get('ticker_previsao') != dados['ticker']):
             
             with st.spinner('Gerando previsões com IA...'):
-                previsoes_ensemble, datas_previsao, detalhes_previsoes, erro_ml = gerar_previsao_acao(dados)
+                previsoes_ensemble, datas_previsao, detalhes_previsoes, confianca_ml, erro_ml = gerar_previsao_acao(dados)
             
             st.session_state.previsoes_ensemble = previsoes_ensemble
             st.session_state.datas_previsao = datas_previsao
             st.session_state.detalhes_previsoes = detalhes_previsoes
+            st.session_state.confianca_ml = confianca_ml
             st.session_state.erro_ml = erro_ml
             st.session_state.ticker_previsao = dados['ticker']
         else:
             previsoes_ensemble = st.session_state.previsoes_ensemble
             datas_previsao = st.session_state.datas_previsao
             detalhes_previsoes = st.session_state.detalhes_previsoes
+            confianca_ml = st.session_state.confianca_ml
             erro_ml = st.session_state.erro_ml
         
         if erro_ml:
@@ -971,46 +1283,32 @@ else:
             st.info("A previsão requer pelo menos 25 dias de histórico.")
         else:
             preco_atual = dados['preco']
-            preco_1_semana = previsoes_ensemble[4]
-            preco_2_semanas = previsoes_ensemble[13]
-            
-            variacao_1_semana = ((preco_1_semana - preco_atual) / preco_atual) * 100
-            variacao_2_semanas = ((preco_2_semanas - preco_atual) / preco_atual) * 100
+            preco_1_dia = previsoes_ensemble[0]
+            preco_5_dias = previsoes_ensemble[4]
+
+            variacao_1_dia = ((preco_1_dia - preco_atual) / preco_atual) * 100
+            variacao_5_dias = ((preco_5_dias - preco_atual) / preco_atual) * 100
             
             st.success("Previsões geradas com sucesso!")
             
             # Métricas de previsão
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("1 Semana", f"R$ {preco_1_semana:.2f}", f"{variacao_1_semana:+.2f}%")
+                st.metric("Próximo Dia", f"R$ {preco_1_dia:.2f}", f"{variacao_1_dia:+.2f}%")
             with col2:
-                st.metric("2 Semanas", f"R$ {preco_2_semanas:.2f}", f"{variacao_2_semanas:+.2f}%")
+                st.metric("5 Dias", f"R$ {preco_5_dias:.2f}", f"{variacao_5_dias:+.2f}%")
             with col3:
-                tendencia = "Alta" if preco_2_semanas > preco_atual else "Baixa"
+                tendencia = "Alta" if preco_5_dias > preco_atual else "Baixa"
                 st.metric("Tendência", tendencia)
             with col4:
-                dispersao = np.std([detalhes_previsoes[modelo][-1] for modelo in detalhes_previsoes.keys()])
-                confianca = max(60, min(90, 85 - (dispersao / preco_atual * 100)))
-                st.metric("Confiança", f"{confianca:.0f}%")
+                st.metric("Confiança", f"{confianca_ml*100:.0f}%")
             
-            # Detalhes por modelo
-            with st.expander("📊 Detalhes por Modelo"):
-                cols = st.columns(len(detalhes_previsoes))
-                
-                icones = {'LSTM': '🧠', 'RandomForest': '🌲', 'GradientBoosting': '🚀', 'LinearRegression': '📈'}
-                nomes = {'LSTM': 'LSTM', 'RandomForest': 'Random Forest', 
-                        'GradientBoosting': 'Gradient Boost', 'LinearRegression': 'Linear Reg.'}
-                
-                for i, modelo in enumerate(detalhes_previsoes.keys()):
-                    with cols[i]:
-                        pred = detalhes_previsoes[modelo][-1]
-                        var = ((pred - preco_atual) / preco_atual) * 100
-                        icone = icones.get(modelo, '📊')
-                        nome = nomes.get(modelo, modelo)
-                        st.metric(f"{icone} {nome}", f"R$ {pred:.2f}", f"{var:+.2f}%")
+
+            # Espaço antes do gráfico
+            st.markdown("<br>", unsafe_allow_html=True)
 
             # Gráfico com previsões
-            fig = criar_grafico_com_previsao(dados['historico'], dados['ticker'], 
+            fig = criar_grafico_com_previsao(dados['historico'], dados['ticker'],
                                            previsoes_ensemble, datas_previsao, detalhes_previsoes)
             st.plotly_chart(fig, use_container_width=True)
             
@@ -1030,5 +1328,5 @@ else:
                         mime="text/plain",
                         use_container_width=True
                     )
-        
+
         st.markdown("</div>", unsafe_allow_html=True)

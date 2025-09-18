@@ -9,6 +9,7 @@ body, html, div, p, span, h1, h2, h3, h4, h5, h6 {
     letter-spacing: -0.01em;
 }
 
+
 header[data-testid="stHeader"], 
 footer, 
 .stDeployButton { 
@@ -33,12 +34,12 @@ div[data-testid="stForm"] form {
     background: transparent !important;
 }
 
-.main-header { 
-    text-align: left; 
+.main-header {
+    text-align: left;
     position: relative;
     top: 0;
     left: 0;
-    color: #00d4ff; 
+    color: #00d4ff;
     font-size: 2.2rem;
     font-weight: 600;
     font-family: 'Poppins', sans-serif !important;
@@ -46,6 +47,33 @@ div[data-testid="stForm"] form {
     margin-bottom: 1rem;
     padding-left: 24px;
     padding-top: 20px;
+}
+
+/* Força centralização do header nas telas de login */
+div.screen-entrada h1.main-header {
+    text-align: center !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    display: block !important;
+}
+
+.screen-entrada .main-header {
+    text-align: center !important;
+    padding-left: 0 !important;
+    width: 100% !important;
+}
+
+/* CSS com máxima especificidade */
+.main .block-container .screen-entrada .main-header {
+    text-align: center !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    width: 100% !important;
 }
 
 .main-header2 { 
@@ -370,3 +398,4 @@ div[data-testid="stSelectbox"] select {
 div[data-testid="stSelectbox"] {
     text-align: right !important;
 }
+
