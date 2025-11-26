@@ -7,12 +7,27 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import plotly.graph_objects as go
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import LSTM, GRU, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.optimizers import Adam
+import tensorflow as tf
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+from reportlab.pdfgen import canvas
+from io import BytesIO
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from database import DatabaseManager
 
@@ -266,8 +281,8 @@ def preparar_dados_financeiros(historico_df, dias_previsao=5):
         df = historico_df.copy()
 
         # Verificar dados mínimos necessários
-        if len(df) < 60:
-            return None, None, None, f"Histórico insuficiente: {len(df)} dias (mínimo: 60)"
+        if len(df) < 40:
+            return None, None, None, f"Histórico insuficiente: {len(df)} dias (mínimo: 40)"
 
         # Features técnicas robustas
         # 1. Médias móveis de diferentes períodos
@@ -309,7 +324,7 @@ def preparar_dados_financeiros(historico_df, dias_previsao=5):
         # Remover NaNs
         df = df.dropna()
 
-        if len(df) < 40:
+        if len(df) < 30:
             return None, None, None, "Dados insuficientes após limpeza"
 
         # Features selecionadas (não correlacionadas)
@@ -349,6 +364,220 @@ def preparar_dados_financeiros(historico_df, dias_previsao=5):
 
     except Exception as e:
         return None, None, None, f"Erro ao preparar dados: {str(e)}"
+
+# ============================================================================
+# NOVO SISTEMA: Modelo GRU com Validação Temporal e Quantificação de Incerteza
+# ============================================================================
+
+def criar_sequencias_temporais(df, window_size=20, forecast_horizon=5):
+    """
+    Cria sequências temporais (sliding windows) para modelos recorrentes (GRU/LSTM)
+
+    Args:
+        df: DataFrame com features já calculadas
+        window_size: Janela de lookback (dias passados para considerar)
+        forecast_horizon: Dias futuros para prever
+
+    Returns:
+        X: Array 3D (samples, timesteps, features)
+        y: Array 2D (samples, forecast_horizon) - retornos futuros
+        feature_names: Lista de features usadas
+        scaler: Scaler fitado (para inversão se necessário)
+    """
+    try:
+        feature_cols = [
+            'Return_1d', 'Return_3d', 'Return_5d',
+            'RSI', 'MACD', 'MACD_histogram',
+            'BB_width', 'BB_position',
+            'Volatility_10d', 'Volatility_20d',
+            'Volume_ratio', 'High_Low_ratio', 'Open_Close_ratio',
+            'Price_above_SMA20', 'SMA_trend'
+        ]
+
+        # Normalizar features (crítico para redes neurais)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(df[feature_cols].values)
+
+        X = []
+        y = []
+
+        for i in range(window_size, len(df) - forecast_horizon):
+            # Janela de features (últimos window_size dias)
+            X.append(features_scaled[i-window_size:i])
+
+            # Target: retornos dos próximos forecast_horizon dias
+            current_price = df['Close'].iloc[i]
+            future_returns = []
+
+            for j in range(1, forecast_horizon + 1):
+                future_price = df['Close'].iloc[i + j]
+                ret = (future_price - current_price) / current_price
+                future_returns.append(ret)
+
+            y.append(future_returns)
+
+        X = np.array(X)
+        y = np.array(y)
+
+        return X, y, feature_cols, scaler, None
+
+    except Exception as e:
+        return None, None, None, None, f"Erro ao criar sequências: {str(e)}"
+
+def criar_modelo_gru(input_shape, forecast_horizon=5, units=50):
+    """
+    Cria modelo GRU com regularização forte para evitar overfitting
+
+    Args:
+        input_shape: Tuple (timesteps, features)
+        forecast_horizon: Número de dias a prever
+        units: Unidades na primeira camada GRU
+
+    Returns:
+        Modelo Keras compilado
+    """
+    model = Sequential([
+        GRU(units, return_sequences=True, input_shape=input_shape),
+        Dropout(0.3),  # Dropout alto para regularização
+        GRU(units // 2, return_sequences=False),
+        Dropout(0.3),
+        Dense(32, activation='relu'),
+        Dropout(0.2),
+        Dense(forecast_horizon)  # Output: 5 retornos futuros
+    ])
+
+    model.compile(
+        optimizer=Adam(learning_rate=0.001),
+        loss='mse',
+        metrics=['mae']
+    )
+
+    return model
+
+def walk_forward_split(X, y, n_splits=5, test_size=10):
+    """
+    Walk-Forward Validation: treina com passado crescente, testa no futuro
+
+    Exemplo com 100 samples, n_splits=5, test_size=10:
+    Split 1: Train [0:50],  Test [50:60]
+    Split 2: Train [0:60],  Test [60:70]
+    Split 3: Train [0:70],  Test [70:80]
+    Split 4: Train [0:80],  Test [80:90]
+    Split 5: Train [0:90],  Test [90:100]
+    """
+    n_samples = len(X)
+    splits = []
+
+    # Tamanho inicial de treino (pelo menos 50% dos dados)
+    initial_train_size = max(int(n_samples * 0.5), n_samples - (n_splits * test_size))
+
+    for i in range(n_splits):
+        train_end = initial_train_size + (i * test_size)
+        test_start = train_end
+        test_end = min(test_start + test_size, n_samples)
+
+        if test_end > n_samples:
+            break
+
+        train_idx = list(range(0, train_end))
+        test_idx = list(range(test_start, test_end))
+
+        if len(test_idx) >= 5:  # Mínimo para teste
+            splits.append((train_idx, test_idx))
+
+    return splits
+
+def prever_com_incerteza(model, X_input, n_iter=50):
+    """
+    Monte Carlo Dropout: faz múltiplas previsões com dropout ativo
+    para quantificar incerteza epistêmica
+
+    Args:
+        model: Modelo Keras com Dropout
+        X_input: Input para previsão
+        n_iter: Número de iterações (quanto maior, mais preciso)
+
+    Returns:
+        mean_pred: Previsão média
+        std_pred: Desvio padrão (incerteza)
+        lower_bound: Limite inferior (95% confiança)
+        upper_bound: Limite superior (95% confiança)
+    """
+    previsoes = []
+
+    for _ in range(n_iter):
+        # training=True mantém Dropout ativo durante inferência
+        pred = model(X_input, training=True)
+        previsoes.append(pred.numpy())
+
+    previsoes = np.array(previsoes)
+
+    # Estatísticas
+    mean_pred = np.mean(previsoes, axis=0)
+    std_pred = np.std(previsoes, axis=0)
+
+    # Intervalos de confiança 95% (2.5% e 97.5% percentis)
+    lower_bound = np.percentile(previsoes, 2.5, axis=0)
+    upper_bound = np.percentile(previsoes, 97.5, axis=0)
+
+    return mean_pred, std_pred, lower_bound, upper_bound
+
+def treinar_modelo_gru_temporal(X, y, validation_split=0.2):
+    """
+    Treina modelo GRU com early stopping e redução de learning rate
+
+    Args:
+        X: Features (samples, timesteps, features)
+        y: Targets (samples, forecast_horizon)
+        validation_split: Fração para validação
+
+    Returns:
+        model: Modelo treinado
+        history: Histórico de treinamento
+        mae_val: MAE no conjunto de validação
+    """
+    # Criar modelo
+    model = criar_modelo_gru(
+        input_shape=(X.shape[1], X.shape[2]),
+        forecast_horizon=y.shape[1],
+        units=50
+    )
+
+    # Callbacks
+    early_stop = EarlyStopping(
+        monitor='val_loss',
+        patience=20,
+        restore_best_weights=True,
+        verbose=0
+    )
+
+    reduce_lr = ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=10,
+        min_lr=0.00001,
+        verbose=0
+    )
+
+    # Treinar
+    history = model.fit(
+        X, y,
+        epochs=100,
+        batch_size=16,
+        validation_split=validation_split,
+        callbacks=[early_stop, reduce_lr],
+        verbose=0
+    )
+
+    # Avaliar no conjunto de validação
+    val_split_idx = int(len(X) * (1 - validation_split))
+    X_val = X[val_split_idx:]
+    y_val = y[val_split_idx:]
+
+    y_pred_val = model.predict(X_val, verbose=0)
+    mae_val = mean_absolute_error(y_val.flatten(), y_pred_val.flatten())
+
+    return model, history, mae_val
 
 # Sistema de validação temporal (Time Series Split)
 def criar_splits_temporais(X, y, n_splits=3):
@@ -578,41 +807,130 @@ def fazer_previsao_financeira(modelos, scores, df_original, X_features):
     except Exception as e:
         return None, None, None, None, f"Erro na previsão: {str(e)}"
 
-# Nova função principal para previsões
+# Nova função principal para previsões com GRU
 def gerar_previsao_acao(dados_acao):
     """
-    Função principal melhorada para gerar previsões de ações
+    Função principal com modelo GRU temporal e quantificação de incerteza
+
+    Returns:
+        previsoes: Array com 5 preços futuros
+        datas: Datas correspondentes
+        detalhes: Dict com lower_bound, upper_bound, volatilidade
+        confianca: Confiança realista (0.3-0.65)
+        erro: Mensagem de erro (None se sucesso)
     """
     try:
         historico = dados_acao.get('historico')
         if historico is None or historico.empty:
             return None, None, None, None, "Dados históricos não disponíveis"
 
-        # Preparar dados com novo sistema
-        X, y, df_features, erro_prep = preparar_dados_financeiros(historico, dias_previsao=5)
+        if len(historico) < 50:
+            return None, None, None, None, f"Histórico insuficiente: {len(historico)} dias (mínimo: 50)"
+
+        # Usar a função existente preparar_dados_financeiros para adicionar features
+        _, _, df, erro_prep = preparar_dados_financeiros(historico, dias_previsao=5)
+
         if erro_prep:
             return None, None, None, None, erro_prep
 
-        # Treinar modelos com validação temporal
-        modelos, scores, erro_treino = treinar_modelos_financeiros(X, y)
-        if erro_treino:
-            return None, None, None, None, erro_treino
+        if df is None or len(df) < 30:
+            return None, None, None, None, "Dados insuficientes após limpeza"
 
-        if not modelos:
-            return None, None, None, None, "Nenhum modelo foi treinado com sucesso"
+        # Criar sequências temporais para GRU
+        # Ajustar window_size baseado na quantidade de dados disponível
+        if len(df) < 50:
+            window_size = 10  # Janela menor para poucos dados
+        else:
+            window_size = 15  # Janela média (mais sequências que 20)
 
-        # Fazer previsões
-        previsoes, datas, detalhes, confianca, erro_pred = fazer_previsao_financeira(
-            modelos, scores, df_features, X
+        X, y, feature_names, scaler, erro_seq = criar_sequencias_temporais(
+            df, window_size=window_size, forecast_horizon=5
         )
 
-        if erro_pred:
-            return None, None, None, None, erro_pred
+        if erro_seq:
+            return None, None, None, None, erro_seq
 
-        return previsoes, datas, detalhes, confianca, None
+        if len(X) < 20:
+            return None, None, None, None, f"Sequências insuficientes: {len(X)} (mínimo: 20)"
+
+        # Treinar modelo GRU com toda a sequência temporal
+        # (no mundo real, usa todo o passado disponível)
+        # Ajustar validation_split baseado no tamanho dos dados
+        if len(X) < 40:
+            validation_split = 0.15  # Menos validação para datasets pequenos
+        else:
+            validation_split = 0.2
+
+        model, history, mae_val = treinar_modelo_gru_temporal(X, y, validation_split=validation_split)
+
+        # Pegar última sequência para fazer previsão
+        ultima_sequencia = X[-1:]  # Shape: (1, 20, 15)
+
+        # Prever COM incerteza (Monte Carlo Dropout)
+        mean_pred, std_pred, lower_bound, upper_bound = prever_com_incerteza(
+            model, ultima_sequencia, n_iter=50
+        )
+
+        # Converter retornos para preços
+        preco_atual = dados_acao['preco']
+        previsoes = []
+        lower_prices = []
+        upper_prices = []
+
+        for i in range(5):
+            # Previsão média
+            preco = preco_atual * (1 + mean_pred[0][i])
+            previsoes.append(preco)
+
+            # Limites do intervalo de confiança
+            lower_p = preco_atual * (1 + lower_bound[0][i])
+            upper_p = preco_atual * (1 + upper_bound[0][i])
+
+            lower_prices.append(lower_p)
+            upper_prices.append(upper_p)
+
+        previsoes = np.array(previsoes)
+        lower_prices = np.array(lower_prices)
+        upper_prices = np.array(upper_prices)
+
+        # Calcular CONFIANÇA REALISTA baseada na volatilidade das previsões
+        volatilidade_previsao = np.mean(std_pred)
+
+        # Confiança: 30-65% (realista para mercado financeiro)
+        # Volatilidade alta = confiança baixa
+        confianca = max(0.30, min(0.65, 1.0 - volatilidade_previsao * 10))
+
+        # Ajustar confiança se MAE de validação for alto
+        if mae_val > 0.03:  # MAE > 3%
+            confianca = max(0.30, confianca * 0.8)
+
+        # Gerar datas de previsão (apenas dias úteis)
+        datas_previsao = []
+        data_atual = df.index.max()
+        dias_adicionados = 0
+
+        while dias_adicionados < 5:
+            data_atual += timedelta(days=1)
+            if data_atual.weekday() < 5:  # Segunda a sexta
+                datas_previsao.append(data_atual)
+                dias_adicionados += 1
+
+        # Detalhes incluem intervalos de confiança
+        detalhes = {
+            'lower_bound': lower_prices,
+            'upper_bound': upper_prices,
+            'volatilidade': volatilidade_previsao,
+            'mae_val': mae_val,
+            'std_pred': std_pred,
+            'epochs_trained': len(history.history['loss'])
+        }
+
+        return previsoes, datas_previsao, detalhes, confianca, None
 
     except Exception as e:
-        return None, None, None, None, f"Erro na previsão: {str(e)}"
+        import traceback
+        erro_detalhado = f"Erro na previsão: {str(e)}\n{traceback.format_exc()}"
+        return None, None, None, None, erro_detalhado
 
 # Sistema de Backtesting para Validação de Previsões
 def fazer_backtesting(dados_acao, dias_retroativos=10, valor_investimento=1000):
@@ -782,75 +1100,363 @@ def analisar_performance_backtesting(resultados_backtesting):
         'resultados_detalhados': resultados_validos
     }
 
-# Geração de relatório de previsão
-def gerar_relatorio_previsao(dados_acao, previsoes_ensemble, datas_previsao, detalhes_previsoes):
+# Geração de relatório de previsão em PDF
+def gerar_relatorio_pdf(dados_acao, previsoes_ensemble, datas_previsao, detalhes_previsoes, confianca_geral):
+    """
+    Gera um relatório PDF formatado e profissional com as previsões
+    """
     try:
-        # Extração de dados básicos
+        # Buffer para o PDF
+        buffer = BytesIO()
+
+        # Criar documento PDF
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=72,
+            leftMargin=72,
+            topMargin=72,
+            bottomMargin=50,
+        )
+
+        # Container para os elementos
+        elementos = []
+
+        # Estilos
+        estilos = getSampleStyleSheet()
+
+        # Estilo customizado para título
+        estilo_titulo = ParagraphStyle(
+            'CustomTitle',
+            parent=estilos['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#00d4ff'),
+            spaceAfter=30,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+
+        # Estilo para subtítulos
+        estilo_subtitulo = ParagraphStyle(
+            'CustomHeading',
+            parent=estilos['Heading2'],
+            fontSize=16,
+            textColor=colors.HexColor('#00d4ff'),
+            spaceAfter=12,
+            spaceBefore=12,
+            fontName='Helvetica-Bold'
+        )
+
+        # Estilo para texto normal
+        estilo_normal = ParagraphStyle(
+            'CustomBody',
+            parent=estilos['Normal'],
+            fontSize=11,
+            alignment=TA_JUSTIFY,
+            spaceAfter=10,
+        )
+
+        # Estilo para destaque
+        estilo_destaque = ParagraphStyle(
+            'CustomHighlight',
+            parent=estilos['Normal'],
+            fontSize=12,
+            textColor=colors.HexColor('#00d4ff'),
+            fontName='Helvetica-Bold',
+            spaceAfter=8,
+        )
+
+        # ====================
+        # CABEÇALHO
+        # ====================
+        titulo = Paragraph("RELATÓRIO DE PREVISÃO", estilo_titulo)
+        elementos.append(titulo)
+
+        subtitulo = Paragraph("MarketMind AI - Análise Preditiva de Ações", estilo_normal)
+        elementos.append(subtitulo)
+        elementos.append(Spacer(1, 20))
+
+        # Linha horizontal
+        linha_data = [['', '', '']]
+        linha_table = Table(linha_data, colWidths=[6.5*inch])
+        linha_table.setStyle(TableStyle([
+            ('LINEABOVE', (0,0), (-1,0), 2, colors.HexColor('#00d4ff')),
+        ]))
+        elementos.append(linha_table)
+        elementos.append(Spacer(1, 20))
+
+        # ====================
+        # INFORMAÇÕES BÁSICAS
+        # ====================
         ticker = dados_acao['ticker']
         nome = dados_acao['nome']
         preco_atual = dados_acao['preco']
         variacao_atual = dados_acao['variacao']
-        
-        # Cálculos de previsão
-        preco_1_semana = previsoes_ensemble[4]
-        preco_2_semanas = previsoes_ensemble[13]
-        variacao_1_semana = ((preco_1_semana - preco_atual) / preco_atual) * 100
-        variacao_2_semanas = ((preco_2_semanas - preco_atual) / preco_atual) * 100
-        
-        tendencia = "ALTA" if preco_2_semanas > preco_atual else "BAIXA"
-        
-        # Cálculo de confiança baseado na dispersão dos modelos
-        dispersao = np.std([detalhes_previsoes[modelo][-1] for modelo in detalhes_previsoes.keys()])
-        confianca = max(60, min(90, 85 - (dispersao / preco_atual * 100)))
-        
         agora = datetime.now().strftime('%d/%m/%Y às %H:%M')
-        
-        return f"""
-================================================================================
-                      RELATÓRIO DE PREVISÃO - MARKETMIND AI
-================================================================================
 
-Ação: {ticker} - {nome}
-Data: {agora}
-Método: Ensemble de Machine Learning
+        info_basica_data = [
+            ['Ação:', f"{ticker} - {nome}"],
+            ['Data do Relatório:', agora],
+            ['Método:', 'Modelo GRU Temporal com Monte Carlo Dropout'],
+            ['Horizonte:', '5 dias úteis'],
+        ]
 
-================================================================================
-PREVISÕES
-================================================================================
+        info_table = Table(info_basica_data, colWidths=[2*inch, 4.5*inch])
+        info_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#1e2130')),
+            ('BACKGROUND', (1, 0), (1, -1), colors.white),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.white),
+            ('TEXTCOLOR', (1, 0), (1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elementos.append(info_table)
+        elementos.append(Spacer(1, 25))
 
-Preço Atual: R$ {preco_atual:.2f} ({variacao_atual:+.2f}%)
+        # ====================
+        # PREVISÕES PRINCIPAIS
+        # ====================
+        elementos.append(Paragraph("PREVISÕES", estilo_subtitulo))
 
-1 Semana: R$ {preco_1_semana:.2f} ({variacao_1_semana:+.2f}%)
-2 Semanas: R$ {preco_2_semanas:.2f} ({variacao_2_semanas:+.2f}%)
+        preco_1_dia = previsoes_ensemble[0]
+        preco_5_dias = previsoes_ensemble[4]
+        variacao_1_dia = ((preco_1_dia - preco_atual) / preco_atual) * 100
+        variacao_5_dias = ((preco_5_dias - preco_atual) / preco_atual) * 100
 
-Tendência: {tendencia}
-Confiança: {confianca:.0f}%
+        # Extrair intervalos de confiança
+        lower_1_dia = detalhes_previsoes.get('lower_bound', [preco_1_dia])[0]
+        upper_1_dia = detalhes_previsoes.get('upper_bound', [preco_1_dia])[0]
+        lower_5_dias = detalhes_previsoes.get('lower_bound', [0]*5)[4]
+        upper_5_dias = detalhes_previsoes.get('upper_bound', [0]*5)[4]
 
-================================================================================
-DETALHES POR MODELO
-================================================================================
+        tendencia = "ALTA ↑" if preco_5_dias > preco_atual else "BAIXA ↓"
+        cor_tendencia = colors.green if preco_5_dias > preco_atual else colors.red
+        confianca_pct = confianca_geral * 100
 
-{chr(10).join([f'{modelo}: R$ {detalhes_previsoes[modelo][-1]:.2f}' for modelo in detalhes_previsoes.keys()])}
+        # Determinar interpretação de confiança
+        if confianca_pct >= 55:
+            interpretacao_conf = "Moderada"
+        elif confianca_pct >= 40:
+            interpretacao_conf = "Baixa"
+        else:
+            interpretacao_conf = "Muito Baixa"
 
-================================================================================
-AVISO LEGAL
-================================================================================
+        previsoes_data = [
+            ['Métrica', 'Valor', 'Intervalo 95%'],
+            ['Preço Atual', f'R$ {preco_atual:.2f}', f'{variacao_atual:+.2f}%'],
+            ['Previsão 1 Dia', f'R$ {preco_1_dia:.2f}', f'R$ {lower_1_dia:.2f} - R$ {upper_1_dia:.2f}'],
+            ['Previsão 5 Dias', f'R$ {preco_5_dias:.2f}', f'R$ {lower_5_dias:.2f} - R$ {upper_5_dias:.2f}'],
+            ['Tendência', tendencia, '-'],
+            ['Confiança do Modelo', f'{confianca_pct:.0f}% ({interpretacao_conf})', '-'],
+        ]
 
-Este relatório é gerado por algoritmos de Machine Learning para fins 
-EXCLUSIVAMENTE EDUCACIONAIS. NÃO constitui recomendação de investimento.
+        prev_table = Table(previsoes_data, colWidths=[2.2*inch, 2.2*inch, 2.1*inch])
+        prev_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#00d4ff')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 11),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ]))
+        elementos.append(prev_table)
+        elementos.append(Spacer(1, 25))
 
-Sempre consulte profissionais qualificados antes de investir.
+        # ====================
+        # MÉTRICAS DO MODELO
+        # ====================
+        elementos.append(Paragraph("MÉTRICAS DO MODELO GRU", estilo_subtitulo))
 
-================================================================================
+        # Extrair métricas técnicas se disponíveis
+        mae_val = detalhes_previsoes.get('mae_val', 0)
+        volatilidade = detalhes_previsoes.get('volatilidade', 0)
+        epochs_trained = detalhes_previsoes.get('epochs_trained', 0)
+
+        metricas_data = [
+            ['Métrica', 'Valor'],
+            ['MAE de Validação', f'{mae_val:.4f}' if mae_val > 0 else 'N/A'],
+            ['Volatilidade da Previsão', f'{volatilidade:.4f}' if volatilidade > 0 else 'N/A'],
+            ['Épocas Treinadas', f'{epochs_trained}' if epochs_trained > 0 else 'N/A'],
+            ['Iterações Monte Carlo', '50'],
+        ]
+
+        metricas_table = Table(metricas_data, colWidths=[3.5*inch, 3*inch])
+        metricas_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e2130')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elementos.append(metricas_table)
+        elementos.append(Spacer(1, 25))
+
+        # ====================
+        # GRÁFICO DE PREVISÃO
+        # ====================
+        elementos.append(Paragraph("VISUALIZAÇÃO GRÁFICA", estilo_subtitulo))
+
+        # Criar gráfico com matplotlib
+        fig, ax = plt.subplots(figsize=(8, 4))
+
+        # Histórico
+        historico = dados_acao.get('historico')
+        if historico is not None and not historico.empty:
+            # Pegar últimos 30 dias
+            hist_recente = historico.tail(30)
+            ax.plot(hist_recente.index, hist_recente['Close'],
+                   color='#00d4ff', linewidth=2, label='Histórico')
+
+        # Banda de confiança se disponível
+        if 'lower_bound' in detalhes_previsoes and 'upper_bound' in detalhes_previsoes:
+            lower_bound = detalhes_previsoes['lower_bound']
+            upper_bound = detalhes_previsoes['upper_bound']
+
+            ax.fill_between(datas_previsao, lower_bound, upper_bound,
+                           color='#ff4444', alpha=0.2, label='IC 95%')
+
+        # Previsões (média)
+        ax.plot(datas_previsao, previsoes_ensemble,
+               color='#ff4444', linewidth=2, marker='o',
+               markersize=6, label='Previsão GRU (Média)')
+
+        ax.set_xlabel('Data', fontsize=10)
+        ax.set_ylabel('Preço (R$)', fontsize=10)
+        ax.set_title(f'{ticker} - Histórico e Previsão com Intervalos de Confiança', fontsize=12, fontweight='bold')
+        ax.legend(loc='best')
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        # Salvar gráfico em buffer
+        img_buffer = BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+        img_buffer.seek(0)
+        plt.close()
+
+        # Adicionar imagem ao PDF
+        from reportlab.platypus import Image
+        img = Image(img_buffer, width=6*inch, height=3*inch)
+        elementos.append(img)
+        elementos.append(Spacer(1, 25))
+
+        # ====================
+        # INTERPRETAÇÃO
+        # ====================
+        elementos.append(Paragraph("INTERPRETAÇÃO DOS RESULTADOS", estilo_subtitulo))
+
+        if variacao_5_dias > 5:
+            interpretacao = f"A previsão indica uma <b>forte tendência de alta</b> para os próximos 5 dias, com valorização estimada de {variacao_5_dias:.2f}%. Esta é uma sinalização positiva segundo o modelo ensemble."
+        elif variacao_5_dias > 0:
+            interpretacao = f"A previsão indica uma <b>tendência moderada de alta</b> para os próximos 5 dias, com valorização estimada de {variacao_5_dias:.2f}%."
+        elif variacao_5_dias > -5:
+            interpretacao = f"A previsão indica uma <b>tendência moderada de baixa</b> para os próximos 5 dias, com desvalorização estimada de {variacao_5_dias:.2f}%."
+        else:
+            interpretacao = f"A previsão indica uma <b>forte tendência de baixa</b> para os próximos 5 dias, com desvalorização estimada de {variacao_5_dias:.2f}%."
+
+        elementos.append(Paragraph(interpretacao, estilo_normal))
+        elementos.append(Spacer(1, 10))
+
+        confianca_texto = f"O modelo GRU apresenta <b>{confianca_pct:.0f}% de confiança</b> nas previsões. "
+        if confianca_pct >= 55:
+            confianca_texto += "Este é um nível de confiança <b>moderado</b> para previsões de mercado. "
+        elif confianca_pct >= 40:
+            confianca_texto += "Este é um nível de confiança <b>baixo</b>, típico para previsões de ações. "
+        else:
+            confianca_texto += "Este é um nível de confiança <b>muito baixo</b>, sugere alta incerteza. "
+
+        confianca_texto += f"O intervalo de confiança 95% mostra que há 95% de probabilidade do preço real estar dentro do range apresentado."
+
+        elementos.append(Paragraph(confianca_texto, estilo_normal))
+        elementos.append(Spacer(1, 15))
+
+        # Adicionar explicação sobre confiança realista
+        explicacao_confianca = f"""
+        <b>Sobre a Confiança:</b> O modelo GRU temporal utiliza Monte Carlo Dropout para quantificar incerteza.
+        Valores de confiança entre 30-65% são <b>normais e realistas</b> para previsão de ações devido à
+        alta complexidade e volatilidade do mercado. Previsões de 50-55% de acurácia direcional são apenas
+        <b>marginalmente melhores que sorte (50%)</b>, o que reflete a eficiência do mercado.
         """
-        
+        elementos.append(Paragraph(explicacao_confianca, estilo_normal))
+        elementos.append(Spacer(1, 30))
+
+        # ====================
+        # AVISO LEGAL
+        # ====================
+        elementos.append(Paragraph("AVISO LEGAL E DISCLAIMER", estilo_subtitulo))
+
+        aviso = f"""
+        <b>IMPORTANTE:</b> Este relatório é gerado por um modelo GRU temporal de Machine Learning para fins
+        <b>EXCLUSIVAMENTE EDUCACIONAIS E INFORMATIVOS</b>. As previsões apresentadas têm confiança <b>{interpretacao_conf.lower()}</b>
+        ({confianca_pct:.0f}%), o que indica <b>alta incerteza</b>.
+        <br/><br/>
+        Uma confiança de {confianca_pct:.0f}% significa que o modelo tem <b>incerteza significativa</b> nas previsões.
+        Modelos de previsão de ações com 50-55% de acurácia direcional são apenas <b>marginalmente melhores que sorte (50%)</b>,
+        refletindo a natureza altamente eficiente e imprevisível do mercado de ações.
+        <br/><br/>
+        Este documento <b>NÃO constitui</b> recomendação de investimento, oferta de compra ou venda de valores mobiliários.
+        Investimentos em ações envolvem riscos significativos de perda de capital.
+        <br/><br/>
+        Desempenho passado não é garantia de resultados futuros. Sempre consulte profissionais qualificados
+        (analistas, assessores de investimentos certificados) antes de tomar qualquer decisão de investimento.
+        <br/><br/>
+        O MarketMind e seus desenvolvedores não se responsabilizam por perdas ou danos decorrentes do uso deste relatório.
+        """
+
+        elementos.append(Paragraph(aviso, estilo_normal))
+        elementos.append(Spacer(1, 20))
+
+        # Rodapé
+        rodape_data = [['', '']]
+        rodape_table = Table(rodape_data, colWidths=[6.5*inch])
+        rodape_table.setStyle(TableStyle([
+            ('LINEABOVE', (0,0), (-1,0), 1, colors.grey),
+        ]))
+        elementos.append(rodape_table)
+
+        rodape_texto = Paragraph(
+            f"<i>Gerado por MarketMind AI em {agora} | www.marketmind.com</i>",
+            ParagraphStyle('Footer', parent=estilos['Normal'], fontSize=8, textColor=colors.grey, alignment=TA_CENTER)
+        )
+        elementos.append(rodape_texto)
+
+        # Construir PDF
+        doc.build(elementos)
+
+        # Retornar buffer
+        buffer.seek(0)
+        return buffer
+
     except Exception as e:
-        return f"Erro ao gerar relatório: {str(e)}"
+        st.error(f"Erro ao gerar PDF: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
 
 # Criação de gráficos
 def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas_previsao=None, detalhes_previsoes=None):
     fig = go.Figure()
-    
+
     if historico is not None and not historico.empty:
         # Linha histórica
         fig.add_trace(go.Scatter(
@@ -861,23 +1467,53 @@ def criar_grafico_com_previsao(historico, ticker, previsoes_ensemble=None, datas
             line=dict(color='#00d4ff', width=3),
             hovertemplate='<b>R$ %{y:.2f}</b><br>%{x}<extra></extra>'
         ))
-        
+
         # Previsões
         if previsoes_ensemble is not None and datas_previsao is not None:
+            # Bandas de confiança (se disponíveis)
+            if detalhes_previsoes and 'lower_bound' in detalhes_previsoes and 'upper_bound' in detalhes_previsoes:
+                lower_bound = detalhes_previsoes['lower_bound']
+                upper_bound = detalhes_previsoes['upper_bound']
+
+                # Banda superior
+                fig.add_trace(go.Scatter(
+                    x=datas_previsao,
+                    y=upper_bound,
+                    mode='lines',
+                    name='IC 95% Superior',
+                    line=dict(color='rgba(255,68,68,0.3)', width=1),
+                    showlegend=True,
+                    hovertemplate='<b>Limite Superior</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
+                ))
+
+                # Banda inferior
+                fig.add_trace(go.Scatter(
+                    x=datas_previsao,
+                    y=lower_bound,
+                    mode='lines',
+                    name='IC 95% Inferior',
+                    line=dict(color='rgba(255,68,68,0.3)', width=1),
+                    fill='tonexty',
+                    fillcolor='rgba(255,68,68,0.2)',
+                    showlegend=True,
+                    hovertemplate='<b>Limite Inferior</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
+                ))
+
+            # Previsão média (linha principal)
             fig.add_trace(go.Scatter(
                 x=datas_previsao,
                 y=previsoes_ensemble,
                 mode='lines+markers',
-                name='Previsão Ensemble',
+                name='Previsão GRU (Média)',
                 line=dict(color='#ff4444', width=3),
                 marker=dict(color='#ff4444', size=8),
-                hovertemplate='<b>Ensemble</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
+                hovertemplate='<b>GRU</b><br><b>R$ %{y:.2f}</b><br>%{x|%d/%m/%Y}<extra></extra>'
             ))
-            
+
             # Linha conectora
             ultimo_preco = historico['Close'].iloc[-1]
             ultima_data = historico.index[-1]
-            
+
             fig.add_trace(go.Scatter(
                 x=[ultima_data, datas_previsao[0]],
                 y=[ultimo_preco, previsoes_ensemble[0]],
@@ -1286,22 +1922,50 @@ else:
             preco_1_dia = previsoes_ensemble[0]
             preco_5_dias = previsoes_ensemble[4]
 
+            # Extrair bounds de confiança se disponíveis
+            lower_1_dia = detalhes_previsoes.get('lower_bound', [preco_1_dia])[0]
+            upper_1_dia = detalhes_previsoes.get('upper_bound', [preco_1_dia])[0]
+            lower_5_dias = detalhes_previsoes.get('lower_bound', [0]*5)[4]
+            upper_5_dias = detalhes_previsoes.get('upper_bound', [0]*5)[4]
+
             variacao_1_dia = ((preco_1_dia - preco_atual) / preco_atual) * 100
             variacao_5_dias = ((preco_5_dias - preco_atual) / preco_atual) * 100
-            
+
             st.success("Previsões geradas com sucesso!")
-            
-            # Métricas de previsão
+
+            # Métricas de previsão com intervalos de confiança
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Próximo Dia", f"R$ {preco_1_dia:.2f}", f"{variacao_1_dia:+.2f}%")
+                st.caption(f"📊 IC 95%: R$ {lower_1_dia:.2f} - R$ {upper_1_dia:.2f}")
             with col2:
                 st.metric("5 Dias", f"R$ {preco_5_dias:.2f}", f"{variacao_5_dias:+.2f}%")
+                st.caption(f"📊 IC 95%: R$ {lower_5_dias:.2f} - R$ {upper_5_dias:.2f}")
             with col3:
                 tendencia = "Alta" if preco_5_dias > preco_atual else "Baixa"
                 st.metric("Tendência", tendencia)
             with col4:
-                st.metric("Confiança", f"{confianca_ml*100:.0f}%")
+                # Confiança com interpretação
+                confianca_pct = confianca_ml * 100
+                if confianca_pct >= 55:
+                    interpretacao = "Moderada"
+                    emoji = "🟡"
+                elif confianca_pct >= 40:
+                    interpretacao = "Baixa"
+                    emoji = "🟠"
+                else:
+                    interpretacao = "Muito Baixa"
+                    emoji = "🔴"
+
+                st.metric("Confiança", f"{confianca_pct:.0f}%")
+                st.caption(f"{emoji} {interpretacao}")
+
+            # Aviso sobre a confiança realista
+            st.info("""
+            ℹ️ **Sobre a Confiança**: O modelo GRU temporal reporta confiança **realista** (30-65%).
+            Valores entre 40-55% são **normais** para previsão de ações devido à alta complexidade e volatilidade do mercado.
+            O intervalo de confiança 95% (IC 95%) mostra o **range de possibilidades** onde o preço real tem 95% de chance de estar.
+            """)
             
 
             # Espaço antes do gráfico
@@ -1312,21 +1976,25 @@ else:
                                            previsoes_ensemble, datas_previsao, detalhes_previsoes)
             st.plotly_chart(fig, use_container_width=True)
             
-            # Relatório
+            # Relatório PDF
             col_rel1, col_rel2, col_rel3 = st.columns([1, 2, 1])
             with col_rel2:
-                if st.button("📄 Gerar Relatório", type="primary", use_container_width=True):
-                    relatorio = gerar_relatorio_previsao(dados, previsoes_ensemble, datas_previsao, detalhes_previsoes)
-                    
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    nome_arquivo = f"Relatorio_{dados['ticker']}_{timestamp}.txt"
-                    
-                    st.download_button(
-                        label="💾 Download Relatório",
-                        data=relatorio,
-                        file_name=nome_arquivo,
-                        mime="text/plain",
-                        use_container_width=True
-                    )
+                if st.button("📄 Gerar Relatório PDF", type="primary", use_container_width=True):
+                    with st.spinner('Gerando relatório em PDF...'):
+                        pdf_buffer = gerar_relatorio_pdf(dados, previsoes_ensemble, datas_previsao,
+                                                         detalhes_previsoes, confianca_ml)
+
+                    if pdf_buffer:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        nome_arquivo = f"Relatorio_MarketMind_{dados['ticker']}_{timestamp}.pdf"
+
+                        st.download_button(
+                            label="💾 Download Relatório PDF",
+                            data=pdf_buffer,
+                            file_name=nome_arquivo,
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+                        st.success("✅ Relatório PDF gerado com sucesso!")
 
         st.markdown("</div>", unsafe_allow_html=True)
