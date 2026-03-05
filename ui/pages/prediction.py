@@ -38,25 +38,47 @@ def render_prediction(dados):
             st.session_state.dados_acao = None
             st.rerun()
 
-    # Gerar previsões se necessário
-    if ('previsoes_ensemble' not in st.session_state or
-        st.session_state.get('ticker_previsao') != dados['ticker']):
+    # Mode selector — shown before any prediction runs
+    col_m1, col_m2, col_m3 = st.columns([1, 2, 1])
+    with col_m2:
+        modo_selecionado = st.radio(
+            "Modo de Análise",
+            ["⚡ Rápida (30-60s)", "🔬 Completa (2-4 min)"],
+            horizontal=True,
+            key="modo_analise_radio",
+        )
+    modo_rapido = "Rápida" in modo_selecionado
 
-        with st.spinner('Gerando previsões com IA...'):
-            previsoes_ensemble, datas_previsao, detalhes_previsoes, confianca_ml, erro_ml = gerar_previsao_acao(dados)
+    has_results = (
+        'previsoes_ensemble' in st.session_state
+        and st.session_state.get('ticker_previsao') == dados['ticker']
+        and st.session_state.get('modo_usado') == modo_rapido
+    )
 
-        st.session_state.previsoes_ensemble = previsoes_ensemble
-        st.session_state.datas_previsao = datas_previsao
-        st.session_state.detalhes_previsoes = detalhes_previsoes
-        st.session_state.confianca_ml = confianca_ml
-        st.session_state.erro_ml = erro_ml
-        st.session_state.ticker_previsao = dados['ticker']
-    else:
-        previsoes_ensemble = st.session_state.previsoes_ensemble
-        datas_previsao = st.session_state.datas_previsao
-        detalhes_previsoes = st.session_state.detalhes_previsoes
-        confianca_ml = st.session_state.confianca_ml
-        erro_ml = st.session_state.erro_ml
+    if not has_results:
+        col_b1, col_b2, col_b3 = st.columns([1, 2, 1])
+        with col_b2:
+            if st.button("Gerar Previsão", type="primary", use_container_width=True):
+                with st.spinner('Gerando previsões com IA...'):
+                    previsoes_ensemble, datas_previsao, detalhes_previsoes, confianca_ml, erro_ml = gerar_previsao_acao(
+                        dados, modo_rapido=modo_rapido
+                    )
+                st.session_state.previsoes_ensemble = previsoes_ensemble
+                st.session_state.datas_previsao = datas_previsao
+                st.session_state.detalhes_previsoes = detalhes_previsoes
+                st.session_state.confianca_ml = confianca_ml
+                st.session_state.erro_ml = erro_ml
+                st.session_state.ticker_previsao = dados['ticker']
+                st.session_state.modo_usado = modo_rapido
+                st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    previsoes_ensemble = st.session_state.previsoes_ensemble
+    datas_previsao = st.session_state.datas_previsao
+    detalhes_previsoes = st.session_state.detalhes_previsoes
+    confianca_ml = st.session_state.confianca_ml
+    erro_ml = st.session_state.erro_ml
 
     if erro_ml:
         st.error(f"Erro na previsão: {erro_ml}")
@@ -106,7 +128,7 @@ def render_prediction(dados):
 
         # Aviso sobre a confiança realista
         st.info("""
-        ℹ️ **Sobre a Confiança**: O modelo GRU temporal reporta confiança **realista** (30-65%).
+        ℹ️ **Sobre a Confiança**: O modelo LSTM temporal reporta confiança **realista** (30-65%).
         Valores entre 40-55% são **normais** para previsão de ações devido à alta complexidade e volatilidade do mercado.
         O intervalo de confiança 95% (IC 95%) mostra o **range de possibilidades** onde o preço real tem 95% de chance de estar.
         """)

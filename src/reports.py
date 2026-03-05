@@ -107,10 +107,11 @@ def gerar_relatorio_pdf(dados_acao, previsoes_ensemble, datas_previsao, detalhes
         variacao_atual = dados_acao['variacao']
         agora = datetime.now().strftime('%d/%m/%Y às %H:%M')
 
+        modo_label = 'Rápido (80/20)' if detalhes_previsoes.get('modo') == 'rapido' else 'Completo (Walk-Forward)'
         info_basica_data = [
             ['Ação:', f"{ticker} - {nome}"],
             ['Data do Relatório:', agora],
-            ['Método:', 'Modelo GRU Temporal com Monte Carlo Dropout'],
+            ['Método:', f'LSTM Temporal com Monte Carlo Dropout — Modo {modo_label}'],
             ['Horizonte:', '5 dias úteis'],
         ]
 
@@ -192,19 +193,25 @@ def gerar_relatorio_pdf(dados_acao, previsoes_ensemble, datas_previsao, detalhes
         # ====================
         # MÉTRICAS DO MODELO
         # ====================
-        elementos.append(Paragraph("MÉTRICAS DO MODELO GRU", estilo_subtitulo))
+        elementos.append(Paragraph("MÉTRICAS DO MODELO LSTM", estilo_subtitulo))
 
-        # Extrair métricas técnicas se disponíveis
         mae_val = detalhes_previsoes.get('mae_val', 0)
         volatilidade = detalhes_previsoes.get('volatilidade', 0)
-        epochs_trained = detalhes_previsoes.get('epochs_trained', 0)
+        dir_acc = detalhes_previsoes.get('directional_accuracy', None)
+        gap_ratio = detalhes_previsoes.get('gap_ratio', None)
+        gap_status = detalhes_previsoes.get('gap_status', 'N/A')
+
+        dir_acc_str = f'{dir_acc:.1%}' if dir_acc is not None else 'N/A'
+        gap_str = f'{gap_ratio} ({gap_status})' if gap_ratio is not None else 'N/A'
 
         metricas_data = [
             ['Métrica', 'Valor'],
-            ['MAE de Validação', f'{mae_val:.4f}' if mae_val > 0 else 'N/A'],
-            ['Volatilidade da Previsão', f'{volatilidade:.4f}' if volatilidade > 0 else 'N/A'],
-            ['Épocas Treinadas', f'{epochs_trained}' if epochs_trained > 0 else 'N/A'],
+            ['MAE de Validação', f'{mae_val:.5f}' if mae_val > 0 else 'N/A'],
+            ['Acurácia Direcional (val)', dir_acc_str],
+            ['Overfitting Gap Ratio', gap_str],
+            ['Volatilidade da Previsão (MC)', f'{volatilidade:.5f}' if volatilidade > 0 else 'N/A'],
             ['Iterações Monte Carlo', '50'],
+            ['Modo de Análise', modo_label],
         ]
 
         metricas_table = Table(metricas_data, colWidths=[3.5*inch, 3*inch])
@@ -252,11 +259,11 @@ def gerar_relatorio_pdf(dados_acao, previsoes_ensemble, datas_previsao, detalhes
         # Previsões (média)
         ax.plot(datas_previsao, previsoes_ensemble,
                color='#ff4444', linewidth=2, marker='o',
-               markersize=6, label='Previsão GRU (Média)')
+               markersize=6, label='Previsão LSTM (Média)')
 
         ax.set_xlabel('Data', fontsize=10)
         ax.set_ylabel('Preço (R$)', fontsize=10)
-        ax.set_title(f'{ticker} - Histórico e Previsão com Intervalos de Confiança', fontsize=12, fontweight='bold')
+        ax.set_title(f'{ticker} — Histórico e Previsão LSTM com IC 95%', fontsize=12, fontweight='bold')
         ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
@@ -290,7 +297,7 @@ def gerar_relatorio_pdf(dados_acao, previsoes_ensemble, datas_previsao, detalhes
         elementos.append(Paragraph(interpretacao, estilo_normal))
         elementos.append(Spacer(1, 10))
 
-        confianca_texto = f"O modelo GRU apresenta <b>{confianca_pct:.0f}% de confiança</b> nas previsões. "
+        confianca_texto = f"O modelo LSTM apresenta <b>{confianca_pct:.0f}% de confiança</b> nas previsões. "
         if confianca_pct >= 55:
             confianca_texto += "Este é um nível de confiança <b>moderado</b> para previsões de mercado. "
         elif confianca_pct >= 40:
@@ -305,7 +312,7 @@ def gerar_relatorio_pdf(dados_acao, previsoes_ensemble, datas_previsao, detalhes
 
         # Adicionar explicação sobre confiança realista
         explicacao_confianca = f"""
-        <b>Sobre a Confiança:</b> O modelo GRU temporal utiliza Monte Carlo Dropout para quantificar incerteza.
+        <b>Sobre a Confiança:</b> O modelo LSTM temporal utiliza Monte Carlo Dropout para quantificar incerteza.
         Valores de confiança entre 30-65% são <b>normais e realistas</b> para previsão de ações devido à
         alta complexidade e volatilidade do mercado. Previsões de 50-55% de acurácia direcional são apenas
         <b>marginalmente melhores que sorte (50%)</b>, o que reflete a eficiência do mercado.
@@ -320,7 +327,7 @@ def gerar_relatorio_pdf(dados_acao, previsoes_ensemble, datas_previsao, detalhes
         elementos.append(Paragraph("AVISO LEGAL E DISCLAIMER", estilo_subtitulo))
 
         aviso = f"""
-        <b>IMPORTANTE:</b> Este relatório é gerado por um modelo GRU temporal de Machine Learning para fins
+        <b>IMPORTANTE:</b> Este relatório é gerado por um modelo LSTM temporal de Machine Learning para fins
         <b>EXCLUSIVAMENTE EDUCACIONAIS E INFORMATIVOS</b>. As previsões apresentadas têm confiança <b>{interpretacao_conf.lower()}</b>
         ({confianca_pct:.0f}%), o que indica <b>alta incerteza</b>.
         <br/><br/>

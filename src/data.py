@@ -1,127 +1,132 @@
-import requests
+import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime
 import streamlit as st
 
-API_KEY = "nUUZxG2ZdAWuSkBDhPobC2"
+
+def _normalizar_ticker_br(ticker):
+    """Adiciona sufixo .SA para tickers da B3 se necessário."""
+    ticker = ticker.upper().strip()
+    if not ticker.endswith('.SA'):
+        ticker = ticker + '.SA'
+    return ticker
 
 
 def buscar_dados_rapidos(ticker):
+    """Busca preço e variação atual para cards de favoritos (rápido)."""
     try:
-        headers = {"Authorization": f"Bearer {API_KEY}"}
-        response = requests.get(f"https://brapi.dev/api/quote/{ticker}", headers=headers, timeout=5)
-
-        if response.status_code == 200:
-            data = response.json()
-            if 'results' in data and data['results']:
-                acao_data = data['results'][0]
-                return {
-                    'preco': round(acao_data.get('regularMarketPrice', 0), 2),
-                    'variacao': round(acao_data.get('regularMarketChangePercent', 0), 2),
-                    'sucesso': True
-                }
+        ticker_yf = _normalizar_ticker_br(ticker)
+        fi = yf.Ticker(ticker_yf).fast_info
+        preco = round(float(fi.last_price), 2)
+        prev = float(fi.previous_close) if fi.previous_close else preco
+        variacao = round(((preco - prev) / prev) * 100, 2) if prev else 0.0
+        return {'preco': preco, 'variacao': variacao, 'sucesso': True}
     except Exception:
-        pass
-
-    return {'preco': 0, 'variacao': 0, 'sucesso': False}
+        return {'preco': 0, 'variacao': 0, 'sucesso': False}
 
 
 def buscar_dados_acao(ticker):
+    """
+    Busca dados completos de uma ação da B3 via Yahoo Finance.
+    Retorna 5 anos de histórico diário ajustado por splits/dividendos.
+    """
     try:
-        ticker = ticker.upper().strip()
+        ticker_original = ticker.upper().strip()
+        ticker_yf = _normalizar_ticker_br(ticker_original)
 
-        with st.spinner(f'Buscando dados para {ticker}...'):
-            headers = {"Authorization": f"Bearer {API_KEY}"}
+        with st.spinner(f'Buscando dados para {ticker_original}...'):
+            yf_ticker = yf.Ticker(ticker_yf)
 
-            # Dados atuais
-            response = requests.get(f"https://brapi.dev/api/quote/{ticker}", headers=headers, timeout=10)
-            if response.status_code != 200:
-                return None, f"Erro {response.status_code}: Ticker {ticker} não encontrado"
+            # Histórico: 5 anos, dados diários, ajustados automaticamente
+            historico = yf.download(
+                ticker_yf,
+                period='5y',
+                interval='1d',
+                progress=False,
+                auto_adjust=True
+            )
 
-            data = response.json()
-            if 'results' not in data or not data['results']:
-                return None, f"Ticker {ticker} não encontrado na B3"
+            if historico is None or historico.empty:
+                return None, f"Ticker {ticker_original} não encontrado na B3"
 
-            acao_data = data['results'][0]
+            # yfinance >= 0.2.x pode retornar MultiIndex em alguns casos
+            if isinstance(historico.columns, pd.MultiIndex):
+                historico.columns = historico.columns.droplevel(1)
 
-            # Dados históricos
-            response_hist = requests.get(f"https://brapi.dev/api/quote/{ticker}?range=3mo&interval=1d",
-                                       headers=headers, timeout=10)
+            historico.index = pd.to_datetime(historico.index)
+            historico = historico.sort_index()
 
-            historico, dados_3_meses, indicadores = None, None, {}
+            # Manter apenas colunas OHLCV
+            historico = historico[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
 
-            if response_hist.status_code == 200:
-                data_hist = response_hist.json()
+            # Remover linhas com Close zero ou NaN (feriados, etc.)
+            historico = historico[historico['Close'] > 0].dropna(subset=['Close'])
 
-                if 'results' in data_hist and data_hist['results']:
-                    hist_data = data_hist['results'][0].get('historicalDataPrice', [])
+            if len(historico) < 30:
+                return None, f"Histórico insuficiente para {ticker_original}"
 
-                    if hist_data:
-                        hist_list = []
-                        for item in hist_data:
-                            try:
-                                hist_list.append({
-                                    'Data': datetime.fromtimestamp(item['date']),
-                                    'Close': item.get('close', 0),
-                                    'Open': item.get('open', 0),
-                                    'High': item.get('high', 0),
-                                    'Low': item.get('low', 0),
-                                    'Volume': item.get('volume', 0)
-                                })
-                            except (KeyError, ValueError):
-                                continue
+            # Preços atuais via fast_info
+            fi = yf_ticker.fast_info
+            preco = round(float(fi.last_price), 2)
+            prev_close = float(fi.previous_close) if fi.previous_close else preco
+            variacao_valor = round(preco - prev_close, 2)
+            variacao_pct = round((variacao_valor / prev_close) * 100, 2) if prev_close else 0.0
 
-                        if hist_list:
-                            historico = pd.DataFrame(hist_list).set_index('Data').sort_index()
+            day_high = round(float(fi.day_high), 2) if fi.day_high else round(float(historico['High'].iloc[-1]), 2)
+            day_low = round(float(fi.day_low), 2) if fi.day_low else round(float(historico['Low'].iloc[-1]), 2)
+            day_open = round(float(fi.open), 2) if fi.open else round(float(historico['Open'].iloc[-1]), 2)
+            volume_hoje = int(historico['Volume'].iloc[-1])
 
-                            # Dados de 3 meses atrás
-                            if len(historico) > 30:
-                                idx_proporcional = min(len(historico) - 1, len(historico) * 3 // 4)
-                                dados_3m_atras = historico.iloc[-idx_proporcional]
-                                dados_3_meses = {
-                                    'data': dados_3m_atras.name.strftime('%d/%m/%Y'),
-                                    'preco': round(dados_3m_atras['Close'], 2),
-                                    'volume': int(dados_3m_atras['Volume'])
-                                }
+            # Nome da empresa e market cap (chamada separada, tolera falha)
+            nome = ticker_original
+            market_cap = 0
+            try:
+                info = yf_ticker.info
+                nome = info.get('shortName') or info.get('longName') or ticker_original
+                market_cap = info.get('marketCap', 0) or 0
+            except Exception:
+                pass
 
-                            # Indicadores técnicos
-                            if len(historico) > 0:
-                                indicadores.update({
-                                    'maxima_52s': round(historico['High'].max(), 2),
-                                    'minima_52s': round(historico['Low'].min(), 2),
-                                    'volume_medio': int(historico['Volume'].tail(min(30, len(historico))).mean())
-                                })
+            # Indicadores técnicos básicos para exibição na tela de detalhes
+            indicadores = {}
+            if len(historico) >= 20:
+                indicadores['maxima_52s'] = round(float(historico['High'].tail(252).max()), 2)
+                indicadores['minima_52s'] = round(float(historico['Low'].tail(252).min()), 2)
+                indicadores['volume_medio'] = int(historico['Volume'].tail(30).mean())
+                indicadores['media_20d'] = round(float(historico['Close'].tail(20).mean()), 2)
+            if len(historico) >= 50:
+                indicadores['media_50d'] = round(float(historico['Close'].tail(50).mean()), 2)
+            if len(historico) >= 30:
+                returns = historico['Close'].pct_change().tail(30)
+                indicadores['volatilidade'] = round(float(returns.std() * np.sqrt(252) * 100), 1)
 
-                                if len(historico) >= 20:
-                                    indicadores['media_20d'] = round(historico['Close'].tail(20).mean(), 2)
-                                if len(historico) >= 50:
-                                    indicadores['media_50d'] = round(historico['Close'].tail(50).mean(), 2)
-                                if len(historico) >= 30:
-                                    returns = historico['Close'].pct_change().tail(30)
-                                    volatilidade = returns.std() * np.sqrt(252) * 100
-                                    indicadores['volatilidade'] = round(volatilidade, 1)
+            # Comparativo 3 meses (~63 dias úteis)
+            dados_3_meses = None
+            if len(historico) > 63:
+                d3m = historico.iloc[-63]
+                dados_3_meses = {
+                    'data': d3m.name.strftime('%d/%m/%Y'),
+                    'preco': round(float(d3m['Close']), 2),
+                    'volume': int(d3m['Volume'])
+                }
 
             return {
-                'ticker': acao_data.get('symbol', ticker),
-                'nome': acao_data.get('shortName', acao_data.get('longName', 'N/A')),
-                'preco': round(acao_data.get('regularMarketPrice', 0), 2),
-                'variacao': round(acao_data.get('regularMarketChangePercent', 0), 2),
-                'variacao_valor': round(acao_data.get('regularMarketChange', 0), 2),
-                'maxima': round(acao_data.get('regularMarketDayHigh', 0), 2),
-                'minima': round(acao_data.get('regularMarketDayLow', 0), 2),
-                'volume': acao_data.get('regularMarketVolume', 0),
-                'abertura': round(acao_data.get('regularMarketOpen', 0), 2),
-                'fechamento_anterior': round(acao_data.get('regularMarketPreviousClose', 0), 2),
-                'market_cap': acao_data.get('marketCap', 0),
+                'ticker': ticker_original,
+                'nome': nome,
+                'preco': preco,
+                'variacao': variacao_pct,
+                'variacao_valor': variacao_valor,
+                'maxima': day_high,
+                'minima': day_low,
+                'volume': volume_hoje,
+                'abertura': day_open,
+                'fechamento_anterior': round(prev_close, 2),
+                'market_cap': market_cap,
                 'historico': historico,
                 'dados_3_meses': dados_3_meses,
                 'indicadores': indicadores
             }, None
 
-    except requests.exceptions.Timeout:
-        return None, "Timeout: API demorou para responder."
-    except requests.exceptions.ConnectionError:
-        return None, "Erro de conexão. Verifique sua internet."
     except Exception as e:
-        return None, f"Erro: {str(e)}"
+        return None, f"Erro ao buscar {ticker}: {str(e)}"
