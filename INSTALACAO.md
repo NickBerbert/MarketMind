@@ -9,6 +9,24 @@ As seguintes bibliotecas foram adicionadas ao projeto:
 - **reportlab>=4.0.0** - Geração de relatórios PDF profissionais
 - **matplotlib>=3.7.0** - Gráficos para PDF e análises no Jupyter
 
+## 🧰 Criar e ativar um ambiente virtual
+
+Se você quiser manter as dependências isoladas, crie um ambiente virtual antes de instalar qualquer pacote. No Windows:
+
+```powershell
+python -m venv venv      # cria a pasta venv
+venv\Scripts\activate   # ativa o ambiente
+```
+
+No Linux ou macOS:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+Depois que o ambiente estiver ativo, instale as dependências conforme as seções seguintes.
+
 ## 📥 Como Instalar
 
 ### Opção 1: Instalar todas as dependências (Recomendado)
